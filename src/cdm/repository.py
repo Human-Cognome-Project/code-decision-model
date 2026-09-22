@@ -817,6 +817,73 @@ def split_repository_examples_balanced(
     )
 
 
+def split_repository_examples_by_namespace(
+    examples: Iterable[DecisionExample],
+    *,
+    seed: int = 0,
+    train_fraction: float = 0.7,
+    validation_fraction: float = 0.15,
+    small_namespace: str = "train",
+) -> RepositoryDataset:
+    """Balance source-disjoint splits independently inside each repository namespace.
+
+    Sources must have been prefixed with namespace_repository_examples. Namespaces
+    with too few source groups to populate every requested partition can either be
+    placed entirely in training (small_namespace="train") or rejected
+    (small_namespace="error").
+    """
+    if small_namespace not in {"train", "error"}:
+        raise ValueError("small_namespace must be 'train' or 'error'")
+
+    materialized = tuple(examples)
+    if not materialized:
+        return RepositoryDataset(train=(), validation=(), test=())
+
+    strata: dict[str, list[DecisionExample]] = {}
+    for example in materialized:
+        if example.source is None or "::" not in example.source:
+            raise ValueError(
+                "namespace-stratified splitting requires namespaced source provenance"
+            )
+        namespace, _ = example.source.split("::", 1)
+        strata.setdefault(namespace, []).append(example)
+
+    requested_splits = 2 + int(validation_fraction > 0.0)
+    combined = {
+        "train": [],
+        "validation": [],
+        "test": [],
+    }
+
+    for namespace in sorted(strata):
+        stratum = strata[namespace]
+        source_count = len({example.source for example in stratum})
+        if source_count < requested_splits:
+            if small_namespace == "error":
+                raise ValueError(
+                    f"namespace {namespace!r} has {source_count} source groups; "
+                    f"need {requested_splits}"
+                )
+            combined["train"].extend(stratum)
+            continue
+
+        split = split_repository_examples_balanced(
+            stratum,
+            seed=seed,
+            train_fraction=train_fraction,
+            validation_fraction=validation_fraction,
+        )
+        combined["train"].extend(split.train)
+        combined["validation"].extend(split.validation)
+        combined["test"].extend(split.test)
+
+    return RepositoryDataset(
+        train=tuple(combined["train"]),
+        validation=tuple(combined["validation"]),
+        test=tuple(combined["test"]),
+    )
+
+
 def write_jsonl_dataset(dataset: RepositoryDataset, output_dir: str | Path) -> dict[str, Path]:
     """Write train/validation/test JSONL files and return their paths."""
     out = Path(output_dir)
