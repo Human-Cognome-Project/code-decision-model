@@ -30,15 +30,6 @@ from .rejection_memory import (
     verify_selection_with_memory,
 )
 from .crossfile import repository_hard_masked_cross_file_call_examples
-from .call_intent import (
-    CallIntentOutcome,
-    CallIntentVerification,
-    PairedCallIntentOutcome,
-    build_call_intent_prompt,
-    run_call_intent_loop,
-    run_paired_call_intent,
-    verify_call_intent,
-)
 from .ranked_memory import (
     RankedMemoryTrace,
     ranked_recommendation,
@@ -87,13 +78,6 @@ __all__ = [
     "run_repair_loop",
     "verify_repair",
     "repository_hard_masked_cross_file_call_examples",
-    "CallIntentOutcome",
-    "CallIntentVerification",
-    "PairedCallIntentOutcome",
-    "build_call_intent_prompt",
-    "run_call_intent_loop",
-    "run_paired_call_intent",
-    "verify_call_intent",
     "RankedMemoryTrace",
     "ranked_recommendation",
     "ranking_from_scores",

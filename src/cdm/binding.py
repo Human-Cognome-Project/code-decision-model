@@ -55,17 +55,6 @@ class Parameters:
         return self.positional_only + self.positional_or_keyword
 
 
-def shape_of_call(node: ast.Call, *, receiver: bool) -> CallShape:
-    """Describe how one call node invokes its target."""
-    return CallShape(
-        positional=sum(not isinstance(arg, ast.Starred) for arg in node.args),
-        keywords=frozenset(kw.arg for kw in node.keywords if kw.arg is not None),
-        starred=any(isinstance(arg, ast.Starred) for arg in node.args),
-        double_starred=any(kw.arg is None for kw in node.keywords),
-        receiver=receiver,
-    )
-
-
 def call_shapes(context: str, *, marker: str = MARKER) -> tuple[CallShape, ...]:
     """Extract every call of the masked marker from the caller source."""
     try:
@@ -79,9 +68,24 @@ def call_shapes(context: str, *, marker: str = MARKER) -> tuple[CallShape, ...]:
             continue
         func = node.func
         if isinstance(func, ast.Name) and func.id == marker:
-            shapes.append(shape_of_call(node, receiver=False))
+            receiver = False
         elif isinstance(func, ast.Attribute) and func.attr == marker:
-            shapes.append(shape_of_call(node, receiver=True))
+            receiver = True
+        else:
+            continue
+        shapes.append(
+            CallShape(
+                positional=sum(
+                    not isinstance(arg, ast.Starred) for arg in node.args
+                ),
+                keywords=frozenset(
+                    kw.arg for kw in node.keywords if kw.arg is not None
+                ),
+                starred=any(isinstance(arg, ast.Starred) for arg in node.args),
+                double_starred=any(kw.arg is None for kw in node.keywords),
+                receiver=receiver,
+            )
+        )
     return tuple(shapes)
 
 
