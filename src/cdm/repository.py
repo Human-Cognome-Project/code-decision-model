@@ -822,7 +822,7 @@ def split_repository_examples_by_namespace(
     *,
     seed: int = 0,
     train_fraction: float = 0.7,
-    validation_fraction: float = 0.0,
+    validation_fraction: float = 0.15,
     small_namespace: str = "train",
 ) -> RepositoryDataset:
     """Balance source-disjoint splits independently inside each repository namespace.
@@ -915,7 +915,7 @@ def split_repository_examples_unseen(
     *,
     held_out: Iterable[str],
     seed: int = 0,
-    validation_fraction: float = 0.15,
+    validation_fraction: float = 0.0,
     small_namespace: str = "train",
 ) -> RepositoryDataset:
     """Hold out entire repositories for an unseen-repository evaluation.
