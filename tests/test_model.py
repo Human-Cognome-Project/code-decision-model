@@ -31,6 +31,23 @@ def test_candidate_permutation_equivariance():
     assert torch.allclose(la, lb[torch.tensor([1, 2, 0])], atol=1e-6)
 
 
+def test_adding_candidates_does_not_change_existing_raw_scores():
+    model = make_model().eval()
+    context = "def parse_header(data): return data[0]"
+    question = "Which function parses the header?"
+
+    small = model(context, question, ["parse_header", "read_packet"])
+    large = model(
+        context,
+        question,
+        ["parse_header", "read_packet", "dispatch", "close_socket", "retry"],
+    )
+
+    # Softmax probabilities necessarily renormalize when alternatives are added, but
+    # independently encoded candidates must retain the same pre-softmax evidence.
+    assert torch.allclose(small, large[:2], atol=1e-6)
+
+
 def test_cached_encoding_matches_direct_scoring():
     model = make_model().eval()
     context = "int add(int a, int b) { return a + b; }"
