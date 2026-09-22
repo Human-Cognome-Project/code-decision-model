@@ -44,3 +44,14 @@ Adds a minimal interface so deterministic validators can veto or filter
 candidates after neural scoring. Unique priors stay outside the model as
 machine-checkable constraints; an empty surviving set produces an explicit
 escalate signal.
+
+## E021 — Corrective-turn repair harness
+
+See [E021_CORRECTIVE_TURN_HARNESS.md](E021_CORRECTIVE_TURN_HARNESS.md).
+
+Measures deterministic masked-call repair as a bounded baseline-vs-assisted
+correction loop.
+
+Companion example:
+[E021_CORRECTIVE_TURN_MOCK.md](E021_CORRECTIVE_TURN_MOCK.md) exercises the
+paired measurement path with deterministic mock generators and no model download.
