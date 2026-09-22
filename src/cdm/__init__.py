@@ -9,6 +9,7 @@ from .model import (
 from .text import HashTextEncoder
 from .unixcoder import UniXcoderEncoder
 from .coderank import CodeRankEncoder
+from .potion import PotionCodeEncoder
 
 __all__ = [
     "CodeDecisionModel",
@@ -18,4 +19,5 @@ __all__ = [
     "HashTextEncoder",
     "UniXcoderEncoder",
     "CodeRankEncoder",
+    "PotionCodeEncoder",
 ]
