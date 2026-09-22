@@ -109,39 +109,49 @@ def preencode_examples(
     if not _encoder_is_frozen(model):
         raise ValueError("pre-encoding requires a frozen encoder")
 
-    ordered_texts: list[str] = []
-    seen: set[str] = set()
+    ordered: dict[str, list[str]] = {
+        "context": [],
+        "question": [],
+        "candidate": [],
+    }
+    seen: dict[str, set[str]] = {role: set() for role in ordered}
     for example in examples:
-        for text in (example.context, example.question, *example.candidates):
-            if text not in seen:
-                seen.add(text)
-                ordered_texts.append(text)
+        role_texts = {
+            "context": (example.context,),
+            "question": (example.question,),
+            "candidate": example.candidates,
+        }
+        for role, texts in role_texts.items():
+            for text in texts:
+                if text not in seen[role]:
+                    seen[role].add(text)
+                    ordered[role].append(text)
 
-    cache: dict[str, torch.Tensor] = {}
+    cache: dict[tuple[str, str], torch.Tensor] = {}
     was_training = model.encoder.training
     model.encoder.eval()
     try:
-        for start in range(0, len(ordered_texts), batch_size):
-            batch = ordered_texts[start : start + batch_size]
-            encoded = model.encoder(batch)
-            if encoded.ndim != 2 or encoded.shape[0] != len(batch) or encoded.shape[1] != model.dim:
-                raise ValueError(
-                    f"encoder returned {tuple(encoded.shape)}, expected "
-                    f"({len(batch)}, {model.dim})"
-                )
-            encoded = encoded.detach().to(store_device)
-            for text, vector in zip(batch, encoded):
-                cache[text] = vector.clone()
+        for role in ("context", "question", "candidate"):
+            texts = ordered[role]
+            for start in range(0, len(texts), batch_size):
+                batch = texts[start : start + batch_size]
+                encoded = model.encode_texts(batch, role=role)
+                encoded = encoded.detach().to(store_device)
+                for text, vector in zip(batch, encoded):
+                    cache[(role, text)] = vector.clone()
     finally:
         model.encoder.train(was_training)
 
     result: list[EncodedDecisionExample] = []
     for example in examples:
         dc = EncodedDecisionContext(
-            context=cache[example.context],
-            question=cache[example.question],
+            context=cache[("context", example.context)],
+            question=cache[("question", example.question)],
         )
-        candidates = torch.stack([cache[text] for text in example.candidates], dim=0)
+        candidates = torch.stack(
+            [cache[("candidate", text)] for text in example.candidates],
+            dim=0,
+        )
         result.append(
             EncodedDecisionExample(
                 decision_context=dc,
