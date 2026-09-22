@@ -29,6 +29,22 @@ commit observed when this preregistration was written.
 
 None of these repositories is one of the four E027 development repositories.
 
+### Pool construction
+
+Candidate discovery used the GitHub repository query:
+
+`language:Python fork:false archived:false stars:1000..15000 size:100..50000 pushed:>=2026-01-01`
+
+The eight pinned repositories were chosen from that discovery result before any
+CDM extractor or model was run on them, with deliberate domain spread across
+scientific ML, Python runtime/tooling, optimization, testing, formatting,
+reinforcement learning, a client library, and a static-site generator.
+
+This is **not** a probability sample of GitHub and E031 should not be described
+as one. Its purpose is a preregistered development-independent replication on a
+heterogeneous public repository set, with the selection decision fixed before
+task density or model outcomes are known.
+
 ## Extraction-only eligibility
 
 Before any scorer is trained or generator is run, apply the frozen E027
