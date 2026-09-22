@@ -822,7 +822,7 @@ def split_repository_examples_by_namespace(
     *,
     seed: int = 0,
     train_fraction: float = 0.7,
-    validation_fraction: float = 0.15,
+    validation_fraction: float = 0.0,
     small_namespace: str = "train",
 ) -> RepositoryDataset:
     """Balance source-disjoint splits independently inside each repository namespace.
@@ -920,15 +920,15 @@ def split_repository_examples_unseen(
 ) -> RepositoryDataset:
     """Hold out entire repositories for an unseen-repository evaluation.
 
-    Every example whose namespace is in ``held_out`` becomes test data. The
-    remaining repositories are split into train and validation with the E007
-    balanced source-group splitter applied inside each namespace (E009), so no
-    source file crosses partitions and every retained repository contributes to
-    validation when it has enough source groups.
+    Every example whose namespace is in ``held_out`` becomes test data. By
+    default all remaining examples are training data, matching the frozen E027
+    live protocol where no validation selection is performed. Set a non-zero
+    ``validation_fraction`` only when a retained-repository validation partition
+    is explicitly required; that split remains source-disjoint within namespace.
 
     Nothing from a held-out repository is available for scorer training,
     validation, or threshold selection. This is the split the E025 next gate
-    asks for.
+    asks for; the zero-validation default keeps every allowed training example.
     """
     if not 0.0 <= validation_fraction < 1.0:
         raise ValueError("validation_fraction must be between 0 and 1")
@@ -993,7 +993,7 @@ def leave_one_repository_out(
     examples: Iterable[DecisionExample],
     *,
     seed: int = 0,
-    validation_fraction: float = 0.15,
+    validation_fraction: float = 0.0,
     small_namespace: str = "train",
 ) -> dict[str, RepositoryDataset]:
     """One unseen-repository split per namespace, keyed by the held-out namespace.
