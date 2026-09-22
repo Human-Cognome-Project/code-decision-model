@@ -10,8 +10,9 @@ import copy
 import hashlib
 import json
 import random
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from itertools import permutations
 from typing import Iterable, Mapping
 
 from .synthetic import DecisionExample
@@ -604,6 +605,145 @@ def split_repository_examples(
         train=tuple(buckets["train"]),
         validation=tuple(buckets["validation"]),
         test=tuple(buckets["test"]),
+    )
+
+
+def namespace_repository_examples(
+    examples: Iterable[DecisionExample],
+    namespace: str,
+) -> tuple[DecisionExample, ...]:
+    """Prefix source provenance so examples from multiple repositories can be pooled."""
+    if not namespace or "::" in namespace:
+        raise ValueError("namespace must be non-empty and cannot contain '::'")
+
+    result: list[DecisionExample] = []
+    for example in examples:
+        if example.source is None:
+            raise ValueError("repository examples require source provenance")
+        result.append(
+            replace(
+                example,
+                source=f"{namespace}::{example.source}",
+            )
+        )
+    return tuple(result)
+
+
+def split_repository_examples_balanced(
+    examples: Iterable[DecisionExample],
+    *,
+    seed: int = 0,
+    train_fraction: float = 0.7,
+    validation_fraction: float = 0.15,
+) -> RepositoryDataset:
+    """Create deterministic, source-disjoint splits balanced by example count.
+
+    The older hash splitter independently maps each source into a probability range.
+    That is useful for stable assignment, but small repositories can accidentally
+    receive no validation or test examples. This splitter treats each source file as
+    an indivisible group and greedily minimizes deviation from requested example
+    counts while preserving source-file isolation.
+
+    When validation_fraction is nonzero, at least three source groups are required.
+    """
+    if not 0.0 < train_fraction < 1.0:
+        raise ValueError("train_fraction must be between 0 and 1")
+    if not 0.0 <= validation_fraction < 1.0:
+        raise ValueError("validation_fraction must be between 0 and 1")
+    test_fraction = 1.0 - train_fraction - validation_fraction
+    if test_fraction <= 0.0:
+        raise ValueError("train + validation fractions must leave room for test")
+
+    materialized = tuple(examples)
+    if not materialized:
+        return RepositoryDataset(train=(), validation=(), test=())
+
+    groups: dict[str, list[DecisionExample]] = {}
+    for example in materialized:
+        if example.source is None:
+            raise ValueError("repository examples require source provenance")
+        groups.setdefault(example.source, []).append(example)
+
+    fractions = {
+        "train": train_fraction,
+        "validation": validation_fraction,
+        "test": test_fraction,
+    }
+    active = tuple(name for name, fraction in fractions.items() if fraction > 0.0)
+    if len(groups) < len(active):
+        raise ValueError(
+            f"need at least {len(active)} source groups for non-empty requested splits"
+        )
+
+    total = len(materialized)
+    targets = {name: total * fractions[name] for name in active}
+
+    def stable_key(source: str) -> int:
+        digest = hashlib.sha256(f"{seed}:{source}".encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], "big")
+
+    ordered_groups = sorted(
+        groups.items(),
+        key=lambda item: (-len(item[1]), stable_key(item[0]), item[0]),
+    )
+
+    assigned: dict[str, list[tuple[str, list[DecisionExample]]]] = {
+        name: [] for name in active
+    }
+    counts = {name: 0 for name in active}
+
+    def cost(proposed: dict[str, int]) -> float:
+        return sum(
+            ((proposed[name] - targets[name]) / max(targets[name], 1.0)) ** 2
+            for name in active
+        )
+
+    # Seed each requested split with one of the largest groups. Try every mapping so
+    # the non-empty guarantee introduces the smallest possible imbalance.
+    seed_groups = ordered_groups[: len(active)]
+    best_perm = min(
+        permutations(active),
+        key=lambda perm: cost({
+            name: sum(
+                len(group)
+                for (_, group), assigned_name in zip(seed_groups, perm)
+                if assigned_name == name
+            )
+            for name in active
+        }),
+    )
+    for (source, group), split_name in zip(seed_groups, best_perm):
+        assigned[split_name].append((source, group))
+        counts[split_name] += len(group)
+
+    # Largest-first bin packing keeps one unusually large source from becoming a
+    # late surprise. Relative squared error prevents the train target from dominating
+    # the much smaller validation/test targets.
+    for source, group in ordered_groups[len(active):]:
+        size = len(group)
+
+        def placement_cost(split_name: str) -> tuple[float, int]:
+            proposed = dict(counts)
+            proposed[split_name] += size
+            return cost(proposed), active.index(split_name)
+
+        split_name = min(active, key=placement_cost)
+        assigned[split_name].append((source, group))
+        counts[split_name] += size
+
+    def flatten(name: str) -> tuple[DecisionExample, ...]:
+        if name not in assigned:
+            return ()
+        return tuple(
+            example
+            for _, group in assigned[name]
+            for example in group
+        )
+
+    return RepositoryDataset(
+        train=flatten("train"),
+        validation=flatten("validation"),
+        test=flatten("test"),
     )
 
 
