@@ -40,10 +40,24 @@ class PythonSymbol:
     name: str
     signature: str
     body: str
+    positional_arity: int
+    keyword_only_arity: int
+    has_vararg: bool
+    has_kwarg: bool
 
     @property
     def candidate(self) -> str:
         return f"{self.source}::{self.signature}"
+
+    @property
+    def call_shape(self) -> tuple[int, int, bool, bool]:
+        """Structural parameter shape used to control easy candidate shortcuts."""
+        return (
+            self.positional_arity,
+            self.keyword_only_arity,
+            self.has_vararg,
+            self.has_kwarg,
+        )
 
 
 @dataclass(frozen=True)
@@ -86,12 +100,38 @@ def iter_python_files(
 
 
 def _signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-    args = [arg.arg for arg in node.args.args]
+    """Render parameter names while preserving Python's parameter categories."""
+    parts: list[str] = []
+
+    if node.args.posonlyargs:
+        parts.extend(arg.arg for arg in node.args.posonlyargs)
+        parts.append("/")
+
+    parts.extend(arg.arg for arg in node.args.args)
+
     if node.args.vararg is not None:
-        args.append("*" + node.args.vararg.arg)
+        parts.append("*" + node.args.vararg.arg)
+    elif node.args.kwonlyargs:
+        parts.append("*")
+
+    parts.extend(arg.arg for arg in node.args.kwonlyargs)
+
     if node.args.kwarg is not None:
-        args.append("**" + node.args.kwarg.arg)
-    return f"{node.name}({', '.join(args)})"
+        parts.append("**" + node.args.kwarg.arg)
+
+    return f"{node.name}({', '.join(parts)})"
+
+
+def _call_shape(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[int, int, bool, bool]:
+    """Return positional count, keyword-only count, *args, and **kwargs flags."""
+    return (
+        len(node.args.posonlyargs) + len(node.args.args),
+        len(node.args.kwonlyargs),
+        node.args.vararg is not None,
+        node.args.kwarg is not None,
+    )
 
 
 def _parse_file(root: Path, rel: Path, *, strict: bool) -> tuple[list[PythonSymbol], ast.Module] | None:
@@ -108,12 +148,17 @@ def _parse_file(root: Path, rel: Path, *, strict: bool) -> tuple[list[PythonSymb
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             body = ast.get_source_segment(source, node) or node.name
+            positional, keyword_only, has_vararg, has_kwarg = _call_shape(node)
             symbols.append(
                 PythonSymbol(
                     source=rel.as_posix(),
                     name=node.name,
                     signature=_signature(node),
                     body=body,
+                    positional_arity=positional,
+                    keyword_only_arity=keyword_only,
+                    has_vararg=has_vararg,
+                    has_kwarg=has_kwarg,
                 )
             )
     return symbols, tree
@@ -407,6 +452,98 @@ def repository_masked_call_examples(
                     candidates=candidates,
                     answer_index=answer_index,
                     task="python.masked_direct_call",
+                    source=source_name,
+                )
+            )
+
+    return examples
+
+
+def repository_hard_masked_call_examples(
+    root: str | Path,
+    *,
+    candidate_count: int = 4,
+    candidate_body_chars: int = 768,
+    seed: int = 0,
+    strict: bool = False,
+) -> list[DecisionExample]:
+    """Create a harder masked-call task with structural shortcuts controlled.
+
+    Every candidate:
+    - comes from the caller's source file;
+    - has the same positional arity as the true target;
+    - is not the caller itself.
+
+    File paths are omitted from both context and candidate text because they carry no
+    useful semantic information once the pool is local. Examples that cannot provide
+    the full fixed candidate count are skipped.
+    """
+    if candidate_count < 2:
+        raise ValueError("candidate_count must be at least 2")
+
+    root_path = Path(root).resolve()
+    _, by_file = collect_python_symbols(root_path, strict=strict)
+    examples: list[DecisionExample] = []
+
+    for source_name, local_symbols in sorted(by_file.items()):
+        path = root_path / source_name
+        try:
+            source_text = path.read_text(encoding="utf-8")
+            targets = _direct_local_target_names(source_text, local_symbols)
+        except (OSError, UnicodeError, SyntaxError):
+            if strict:
+                raise
+            continue
+
+        by_name = {symbol.name: symbol for symbol in local_symbols}
+        for caller_name, target_name in sorted(targets.items()):
+            caller = by_name[caller_name]
+            target = by_name[target_name]
+            masked_body = _masked_function_body(
+                source_text,
+                caller_name=caller_name,
+                target_name=target_name,
+            )
+            if masked_body is None:
+                continue
+
+            pool = [
+                symbol
+                for symbol in local_symbols
+                if symbol != caller
+                and symbol.call_shape == target.call_shape
+            ]
+            if target not in pool or len(pool) < candidate_count:
+                continue
+
+            rng = _stable_rng(
+                seed,
+                "hard-masked",
+                source_name,
+                caller_name,
+                target.candidate,
+            )
+            negatives = [symbol for symbol in pool if symbol != target]
+            rng.shuffle(negatives)
+            chosen = [target, *negatives[: candidate_count - 1]]
+            rng.shuffle(chosen)
+
+            candidates = tuple(
+                f"{symbol.signature}\n{symbol.body[:candidate_body_chars]}"
+                for symbol in chosen
+            )
+            answer_index = chosen.index(target)
+
+            examples.append(
+                DecisionExample(
+                    context=masked_body,
+                    question=(
+                        "Which candidate definition should replace "
+                        "__CALL_TARGET__ in this caller?"
+                    ),
+                    candidates=candidates,
+                    answer_index=answer_index,
+                    task="python.hard_masked_direct_call",
                     source=source_name,
                 )
             )
