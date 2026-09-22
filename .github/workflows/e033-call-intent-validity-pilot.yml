@@ -1,0 +1,244 @@
+name: e033-call-intent-validity-pilot
+
+on:
+  push:
+    branches: ["analysis/e033-call-intent-validity-pilot"]
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Restore model cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: e025-qwen05-coderank-${{ runner.os }}-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install model dependencies
+        run: python -m pip install -e ".[hf]"
+      - name: Clone exact E027 revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"
+            sha="$2"
+            dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/recent
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/recent/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/recent/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/recent/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/recent/scrapling
+      - name: Run first-pass validity pilot
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import time
+          from collections import Counter, defaultdict
+
+          import torch
+          from transformers import AutoModelForCausalLM, AutoTokenizer
+
+          from cdm.call_intent import (
+              build_call_intent_prompt,
+              eligible,
+              parse_call_intent,
+              verify_call_intent,
+          )
+          from cdm.crossfile import repository_hard_masked_cross_file_call_examples
+          from cdm.methods import repository_hard_masked_method_call_examples
+          from cdm.repository import repository_hard_masked_call_examples
+
+          REPOS = {
+              "browser-use": "/tmp/recent/browser-use",
+              "crawl4ai": "/tmp/recent/crawl4ai",
+              "markitdown": "/tmp/recent/markitdown",
+              "scrapling": "/tmp/recent/scrapling",
+          }
+          MODEL_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+          MODEL_REVISION = "ea3f2471cf1b1f0db85067f1ef93848e38e88c25"
+          K = 4
+          BODY_CHARS = 512
+          TARGET_N = 64
+
+          rows = []
+          extraction = {}
+          for repo, root in REPOS.items():
+              families = {
+                  "function": repository_hard_masked_call_examples(
+                      root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+                  ),
+                  "method": repository_hard_masked_method_call_examples(
+                      root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+                  ),
+                  "cross_file": repository_hard_masked_cross_file_call_examples(
+                      root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+                  ),
+              }
+              extraction[repo] = {
+                  family: {"total": len(examples), "eligible": sum(eligible(e) for e in examples)}
+                  for family, examples in families.items()
+              }
+              for family, examples in families.items():
+                  for example in examples:
+                      if eligible(example):
+                          rows.append((repo, family, example))
+
+          if len(rows) < TARGET_N:
+              raise RuntimeError(f"only {len(rows)} eligible tasks; need {TARGET_N}")
+
+          def stable_key(row):
+              repo, family, example = row
+              payload = "\x1f".join([
+                  repo, family, example.source, example.task,
+                  str(example.answer_index), example.context,
+              ]).encode("utf-8")
+              return hashlib.sha256(payload).hexdigest()
+
+          # Start with a balanced quota across repo x family strata, then fill any
+          # deficits by the same stable hash order. No model outcome affects selection.
+          by_stratum = defaultdict(list)
+          for row in rows:
+              by_stratum[(row[0], row[1])].append(row)
+          for key in by_stratum:
+              by_stratum[key].sort(key=stable_key)
+
+          selected = []
+          selected_ids = set()
+          quota = 4
+          for key in sorted(by_stratum):
+              for row in by_stratum[key][:quota]:
+                  sid = stable_key(row)
+                  if sid not in selected_ids:
+                      selected.append(row)
+                      selected_ids.add(sid)
+
+          remaining = sorted(
+              (row for row in rows if stable_key(row) not in selected_ids),
+              key=stable_key,
+          )
+          selected.extend(remaining[: max(0, TARGET_N - len(selected))])
+          selected = selected[:TARGET_N]
+
+          sample_counts = Counter((repo, family) for repo, family, _ in selected)
+
+          tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
+          model = AutoModelForCausalLM.from_pretrained(
+              MODEL_ID, revision=MODEL_REVISION, torch_dtype=torch.float32
+          )
+          model.eval()
+
+          records = []
+          for repo, family, example in selected:
+              prompt = build_call_intent_prompt(example)
+              messages = [
+                  {
+                      "role": "system",
+                      "content": (
+                          "You are a precise code repair engine. "
+                          "Answer only with the requested Python call expression."
+                      ),
+                  },
+                  {"role": "user", "content": prompt},
+              ]
+              rendered = tokenizer.apply_chat_template(
+                  messages, tokenize=False, add_generation_prompt=True
+              )
+              inputs = tokenizer(rendered, return_tensors="pt")
+              t0 = time.perf_counter()
+              with torch.inference_mode():
+                  output = model.generate(
+                      **inputs,
+                      max_new_tokens=32,
+                      do_sample=False,
+                      num_beams=1,
+                      pad_token_id=tokenizer.eos_token_id,
+                      eos_token_id=tokenizer.eos_token_id,
+                  )
+              seconds = time.perf_counter() - t0
+              generated = output[0, inputs["input_ids"].shape[-1]:]
+              text = tokenizer.decode(generated, skip_special_tokens=True).strip()
+              verification = verify_call_intent(example, text)
+              parsed = parse_call_intent(text) is not None
+              candidate_resolved = verification.reason not in {
+                  "invalid_call_expression", "unknown_target", "ambiguous_target"
+              }
+              bindable_valid = verification.reason in {
+                  "ok", "wrong_target", "wrong_arguments"
+              }
+              records.append({
+                  "repo": repo,
+                  "family": family,
+                  "source": example.source,
+                  "task": example.task,
+                  "answer_index": example.answer_index,
+                  "output": text,
+                  "reason": verification.reason,
+                  "target_index": verification.target_index,
+                  "parse_valid": parsed,
+                  "candidate_resolved": candidate_resolved,
+                  "bindable_valid": bindable_valid,
+                  "success": verification.valid,
+                  "seconds": seconds,
+              })
+
+          def summarize(rs):
+              n = len(rs)
+              reasons = Counter(r["reason"] for r in rs)
+              return {
+                  "n": n,
+                  "parse_valid": sum(r["parse_valid"] for r in rs),
+                  "candidate_resolved": sum(r["candidate_resolved"] for r in rs),
+                  "bindable_valid": sum(r["bindable_valid"] for r in rs),
+                  "exact_success": sum(r["success"] for r in rs),
+                  "reasons": dict(sorted(reasons.items())),
+                  "mean_generation_seconds": (
+                      sum(r["seconds"] for r in rs) / n if n else 0.0
+                  ),
+              }
+
+          summary = {
+              "model": MODEL_ID,
+              "revision": MODEL_REVISION,
+              "tasks": len(records),
+              "selection": "stable hash; quota 4 per repo x family stratum, then global fill",
+              "sample_counts": {
+                  f"{repo}:{family}": count
+                  for (repo, family), count in sorted(sample_counts.items())
+              },
+              "overall": summarize(records),
+              "by_family": {
+                  family: summarize([r for r in records if r["family"] == family])
+                  for family in sorted({r["family"] for r in records})
+              },
+              "by_repo": {
+                  repo: summarize([r for r in records if r["repo"] == repo])
+                  for repo in sorted({r["repo"] for r in records})
+              },
+              "extraction": extraction,
+          }
+
+          with open("/tmp/e033-validity-pilot.json", "w", encoding="utf-8") as handle:
+              json.dump(
+                  {"summary": summary, "records": records},
+                  handle, indent=2, sort_keys=True
+              )
+          print("E033_VALIDITY_PILOT=" + json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e033-validity-pilot
+          path: /tmp/e033-validity-pilot.json
