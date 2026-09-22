@@ -35,15 +35,18 @@ def _write_repo(tmp_path):
     (pkg / "pipeline.py").write_text(SOURCE, encoding="utf-8")
 
 
-def _candidate_arity(candidate):
+def _candidate_shape(candidate):
     signature = candidate.split("\n", 1)[0]
-    inside = signature.split("(", 1)[1].rsplit(")", 1)[0].strip()
-    if not inside:
-        return 0
-    return sum(1 for part in inside.split(",") if not part.strip().startswith("*"))
+    fn = ast.parse(f"def {signature}:\n    pass\n").body[0]
+    return (
+        len(fn.args.posonlyargs) + len(fn.args.args),
+        len(fn.args.kwonlyargs),
+        fn.args.vararg is not None,
+        fn.args.kwarg is not None,
+    )
 
 
-def test_hard_masked_candidates_control_path_and_arity_shortcuts(tmp_path):
+def test_hard_masked_candidates_control_path_and_call_shape_shortcuts(tmp_path):
     _write_repo(tmp_path)
 
     examples = repository_hard_masked_call_examples(
@@ -60,8 +63,8 @@ def test_hard_masked_candidates_control_path_and_arity_shortcuts(tmp_path):
         assert all("pkg/" not in candidate for candidate in example.candidates)
         assert len(example.candidates) == 4
 
-        arities = {_candidate_arity(candidate) for candidate in example.candidates}
-        assert len(arities) == 1
+        shapes = {_candidate_shape(candidate) for candidate in example.candidates}
+        assert len(shapes) == 1
 
         code = ast.parse(example.context)
         assert not any(
@@ -106,3 +109,43 @@ def test_hard_masked_candidate_order_is_seeded(tmp_path):
 
     assert a == b
     assert any(x.candidates != y.candidates for x, y in zip(a, c))
+
+
+def test_hard_masked_call_shape_comes_from_ast_categories(tmp_path):
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "shapes.py").write_text(
+        """
+def target(a, /, b, *, c):
+    return a + b + c
+
+def same_shape(x, /, y, *, z):
+    return x * y + z
+
+def wrong_plain(a, b, c):
+    return a - b - c
+
+def wrong_vararg(a, b, *rest):
+    return a + b + len(rest)
+
+def caller(a, b, c):
+    return target(a, b, c=c)
+""",
+        encoding="utf-8",
+    )
+
+    examples = repository_hard_masked_call_examples(
+        tmp_path,
+        candidate_count=2,
+        seed=0,
+    )
+
+    assert len(examples) == 1
+    names = {
+        candidate.split("(", 1)[0]
+        for candidate in examples[0].candidates
+    }
+    assert names == {"target", "same_shape"}
+    assert {_candidate_shape(c) for c in examples[0].candidates} == {
+        (2, 1, False, False)
+    }
