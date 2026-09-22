@@ -39,7 +39,7 @@ class PotionCodeEncoder(nn.Module):
                     "Install with: pip install -e '.[potion]'"
                 ) from exc
 
-            kwargs = {"max_length": max_length}
+            kwargs = {}
             if normalize_embeddings is not None:
                 kwargs["normalize"] = normalize_embeddings
             model = StaticModel.from_pretrained(
@@ -48,8 +48,6 @@ class PotionCodeEncoder(nn.Module):
                 **kwargs,
             )
         else:
-            if hasattr(model, "max_length"):
-                model.max_length = max_length
             if normalize_embeddings is not None and hasattr(model, "normalize"):
                 model.normalize = normalize_embeddings
 
@@ -67,7 +65,9 @@ class PotionCodeEncoder(nn.Module):
         if not materialized:
             return torch.empty((0, self.dim), dtype=torch.float32)
 
-        encoded = self.model.encode(materialized)
+        # Model2Vec 0.9 exposes max_length on encode(), while newer main also
+        # supports a model-level default. Passing it per call works across both.
+        encoded = self.model.encode(materialized, max_length=self.max_length)
         tensor = torch.as_tensor(encoded, dtype=torch.float32)
         if tensor.ndim == 1:
             tensor = tensor.unsqueeze(0)
