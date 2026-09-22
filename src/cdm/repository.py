@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import random
+import re
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from itertools import permutations
@@ -42,22 +43,28 @@ class PythonSymbol:
     signature: str
     body: str
     positional_arity: int
+    required_positional: int
     keyword_only_arity: int
+    required_keyword_only: int
     has_vararg: bool
     has_kwarg: bool
+    is_async: bool
 
     @property
     def candidate(self) -> str:
         return f"{self.source}::{self.signature}"
 
     @property
-    def call_shape(self) -> tuple[int, int, bool, bool]:
-        """Structural parameter shape used to control easy candidate shortcuts."""
+    def call_shape(self) -> tuple[int, int, int, int, bool, bool, bool]:
+        """Structural function shape used to control easy candidate shortcuts."""
         return (
             self.positional_arity,
+            self.required_positional,
             self.keyword_only_arity,
+            self.required_keyword_only,
             self.has_vararg,
             self.has_kwarg,
+            self.is_async,
         )
 
 
@@ -125,13 +132,22 @@ def _signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
 
 def _call_shape(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> tuple[int, int, bool, bool]:
-    """Return positional count, keyword-only count, *args, and **kwargs flags."""
+) -> tuple[int, int, int, int, bool, bool, bool]:
+    """Return structural parameter counts/requirements and async/variadic flags."""
+    positional = len(node.args.posonlyargs) + len(node.args.args)
+    required_positional = positional - len(node.args.defaults)
+    keyword_only = len(node.args.kwonlyargs)
+    required_keyword_only = sum(
+        default is None for default in node.args.kw_defaults
+    )
     return (
-        len(node.args.posonlyargs) + len(node.args.args),
-        len(node.args.kwonlyargs),
+        positional,
+        required_positional,
+        keyword_only,
+        required_keyword_only,
         node.args.vararg is not None,
         node.args.kwarg is not None,
+        isinstance(node, ast.AsyncFunctionDef),
     )
 
 
@@ -149,7 +165,15 @@ def _parse_file(root: Path, rel: Path, *, strict: bool) -> tuple[list[PythonSymb
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             body = ast.get_source_segment(source, node) or node.name
-            positional, keyword_only, has_vararg, has_kwarg = _call_shape(node)
+            (
+                positional,
+                required_positional,
+                keyword_only,
+                required_keyword_only,
+                has_vararg,
+                has_kwarg,
+                is_async,
+            ) = _call_shape(node)
             symbols.append(
                 PythonSymbol(
                     source=rel.as_posix(),
@@ -157,9 +181,12 @@ def _parse_file(root: Path, rel: Path, *, strict: bool) -> tuple[list[PythonSymb
                     signature=_signature(node),
                     body=body,
                     positional_arity=positional,
+                    required_positional=required_positional,
                     keyword_only_arity=keyword_only,
+                    required_keyword_only=required_keyword_only,
                     has_vararg=has_vararg,
                     has_kwarg=has_kwarg,
+                    is_async=is_async,
                 )
             )
     return symbols, tree
@@ -195,8 +222,50 @@ def _stable_rng(*parts: object) -> random.Random:
     return random.Random(seed)
 
 
+class _DirectCallVisitor(ast.NodeVisitor):
+    """Collect calls executed in one function body without entering nested scopes."""
+
+    def __init__(
+        self,
+        root: ast.FunctionDef | ast.AsyncFunctionDef,
+        local_names: set[str],
+    ) -> None:
+        self.root = root
+        self.local_names = local_names
+        self.targets: list[str] = []
+
+    def _visit_root_body(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        if node is self.root:
+            for statement in node.body:
+                self.visit(statement)
+        # Nested function bodies are intentionally separate scopes.
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_root_body(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_root_body(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        # A lambda body executes only when the lambda is invoked, not when defined.
+        return
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        # Conservatively exclude calls inside a nested class body from the function label.
+        return
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id in self.local_names
+            and node.func.id != self.root.name
+        ):
+            self.targets.append(node.func.id)
+        self.generic_visit(node)
+
+
 def _direct_local_target_names(source: str, symbols: tuple[PythonSymbol, ...]) -> dict[str, str]:
-    """Return caller->callee for callers with exactly one distinct local target."""
+    """Return caller->callee for callers with exactly one direct local target."""
     tree = ast.parse(source)
     local_names = {symbol.name for symbol in symbols}
     result: dict[str, str] = {}
@@ -204,16 +273,9 @@ def _direct_local_target_names(source: str, symbols: tuple[PythonSymbol, ...]) -
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        targets: list[str] = []
-        for child in ast.walk(node):
-            if (
-                isinstance(child, ast.Call)
-                and isinstance(child.func, ast.Name)
-                and child.func.id in local_names
-                and child.func.id != node.name
-            ):
-                targets.append(child.func.id)
-        unique = tuple(dict.fromkeys(targets))
+        visitor = _DirectCallVisitor(node, local_names)
+        visitor.visit(node)
+        unique = tuple(dict.fromkeys(visitor.targets))
         if len(unique) == 1:
             result[node.name] = unique[0]
 
@@ -376,7 +438,15 @@ def _masked_function_body(
         for node in ast.walk(masked)
     ):
         return None
-    return ast.unparse(masked)
+
+    rendered = ast.unparse(masked)
+
+    # Be stricter than AST identity alone: reject any example where the exact target
+    # identifier survives in a string literal, annotation, nested definition name,
+    # attribute, or other textual artifact that could restore trivial name matching.
+    if re.search(rf"\b{re.escape(target_name)}\b", rendered):
+        return None
+    return rendered
 
 
 def _rich_candidate(symbol: PythonSymbol, *, body_chars: int) -> str:
@@ -472,7 +542,7 @@ def repository_hard_masked_call_examples(
 
     Every candidate:
     - comes from the caller's source file;
-    - has the same positional arity as the true target;
+    - has the same AST-derived structural call shape as the true target;
     - is not the caller itself.
 
     File paths are omitted from both context and candidate text because they carry no
