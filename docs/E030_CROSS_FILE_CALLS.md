@@ -1,9 +1,9 @@
-# E029 — Import-resolved cross-file call supervision
+# E030 — Import-resolved cross-file call supervision
 
 Every hard task in the frozen E027 protocol resolves a masked call inside one
 file: same-file function calls (E006) and same-class method calls (E015). The
 architecture claim is about repository decisions, and OPEN_DIRECTIONS lists
-cross-file callable selection as the next machine-verifiable step. E029 adds it
+cross-file callable selection as the next machine-verifiable step. E030 adds it
 without a language server.
 
 ## Label
@@ -20,10 +20,13 @@ from package.module import name        # module-level statement in the caller's 
 
 Resolution rules, all deterministic:
 
-- absolute imports are tried at the repository root, then at each ancestor
-  directory of the importing file (nearest first), then at each first-level
-  repository directory in sorted order, so `src/` layouts resolve from inside
-  the package and from sibling test trees;
+- absolute imports resolve only under explicitly supported roots: the
+  repository root and each declared source root (`src` by default, settable
+  through `source_roots`). There is no implicit-relative fallback through the
+  importing file's ancestors, because Python 3 does not resolve absolute
+  imports that way;
+- a module path that matches more than one file, across roots or as both
+  `name.py` and `name/__init__.py`, is ambiguous and skipped;
 - relative imports follow the usual package rules, including `from . import x`
   against `__init__.py`;
 - only direct module-level `from ... import ...` statements count;
@@ -42,6 +45,7 @@ The E006/E008/E015 controls carry over, plus three new ones:
 | nested scopes | calls inside nested functions, lambdas, and classes are not attributed to the caller |
 | single target | callers with two distinct cross-file targets are skipped |
 | shadowing | an alias that matches a same-file top-level function is skipped |
+| ambiguity | an absolute import that could name more than one repository file is skipped |
 | alias leakage | the example is discarded if the alias survives anywhere in the rendered caller |
 | real-name leakage | with `import name as alias`, the example is also discarded if `name` survives |
 | call shape | every candidate shares the target's AST call shape and excludes the caller |
@@ -60,7 +64,7 @@ on it unchanged.
 | --- | ---: |
 | hard same-file function calls (E006) | 59 |
 | hard same-class method calls (E015) | 4 |
-| hard cross-file function calls (E029) | 70 |
+| hard cross-file function calls (E030) | 65 |
 
 Cross-file supervision is at least as dense as same-file supervision here.
 Counts are for the commit snapshot: test files import from `cdm`, so tests
@@ -75,7 +79,7 @@ task:
 | Task | Examples with any veto | Mean survivors of 4 | Predicate + uniform |
 | --- | ---: | ---: | ---: |
 | hard same-file function calls | 3.4% | 3.93 | 25.8% |
-| hard cross-file function calls | 55.7% | 2.90 | 43.9% |
+| hard cross-file function calls | 46.2% | 2.97 | 44.0% |
 
 Same-file pools share local naming so same-shape candidates usually also share
 keyword names; repository-wide pools do not. Any scorer result on this task must

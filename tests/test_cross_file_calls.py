@@ -1,4 +1,4 @@
-"""Tests for import-resolved cross-file call supervision (E029)."""
+"""Tests for import-resolved cross-file call supervision (E030)."""
 from __future__ import annotations
 
 import ast
@@ -96,7 +96,7 @@ def test_relative_and_package_init_imports(tmp_path):
     assert targets == {"one": "parse", "two": "boot"}
 
 
-def test_src_layout_resolves_through_ancestor_directory(tmp_path):
+def test_src_layout_resolves_through_source_root(tmp_path):
     _write(tmp_path, {
         "src/pkg/__init__.py": "",
         "src/pkg/lib.py": LIB,
@@ -208,3 +208,51 @@ def test_call_site_predicate_stays_sound_on_this_repository():
     for example in examples:
         allowed = predicate.check(example.context, example.question, example.candidates).allowed
         assert allowed[example.answer_index], example.source
+
+
+def test_no_implicit_relative_absolute_import_resolution(tmp_path):
+    # Python 3 would not resolve `from lib import load` inside pkg/ to pkg/lib.py.
+    _write(tmp_path, {
+        "pkg/__init__.py": "",
+        "pkg/lib.py": LIB,
+        "pkg/user.py": USER.replace("from pkg.lib import load", "from lib import load"),
+    })
+    assert repository_hard_masked_cross_file_call_examples(tmp_path, candidate_count=4) == []
+
+
+def test_ambiguous_absolute_imports_are_skipped(tmp_path):
+    # The same module path exists under the repository root and under src/.
+    _write(tmp_path, {
+        "pkg/__init__.py": "",
+        "pkg/lib.py": LIB,
+        "src/pkg/__init__.py": "",
+        "src/pkg/lib.py": LIB,
+        "pkg/user.py": USER,
+    })
+    assert repository_hard_masked_cross_file_call_examples(tmp_path, candidate_count=4) == []
+
+    # Both pkg/lib.py and pkg/lib/__init__.py exist.
+    _write(tmp_path, {
+        "pkg/__init__.py": "",
+        "pkg/lib.py": LIB,
+        "pkg/lib/__init__.py": LIB,
+        "pkg/user.py": USER,
+    })
+    import shutil
+    shutil.rmtree(tmp_path / "src")
+    assert repository_hard_masked_cross_file_call_examples(tmp_path, candidate_count=4) == []
+
+
+def test_source_roots_are_explicit(tmp_path):
+    _write(tmp_path, {
+        "lib_root/pkg/__init__.py": "",
+        "lib_root/pkg/lib.py": LIB,
+        "lib_root/pkg/user.py": USER,
+    })
+    # Not a supported root by default, so the import does not resolve.
+    assert repository_hard_masked_cross_file_call_examples(tmp_path, candidate_count=4) == []
+    declared = repository_hard_masked_cross_file_call_examples(
+        tmp_path, candidate_count=4, source_roots=("lib_root",)
+    )
+    assert len(declared) == 1
+    assert declared[0].source == "lib_root/pkg/user.py"

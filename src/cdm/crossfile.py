@@ -1,4 +1,4 @@
-"""Machine-verified cross-file call supervision (E029).
+"""Machine-verified cross-file call supervision (E030).
 
 Every existing hard task resolves a masked call inside one file. This module
 adds the first cross-file decision with the same integrity controls. The label
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 from .repository import (
@@ -29,55 +30,58 @@ TASK = "python.hard_masked_cross_file_call"
 
 
 def _module_file(
-    root: Path,
     known_files: frozenset[str],
     importing_file: Path,
     module: str | None,
     level: int,
+    *,
+    source_roots: tuple[str, ...],
 ) -> str | None:
     """Resolve an import statement to a repository-relative Python file.
 
-    Absolute imports are tried at the repository root, then at each ancestor
-    directory of the importing file (nearest first), then at each first-level
-    directory of the repository in sorted order, so ``src/`` layouts resolve
-    both from inside the package and from sibling test trees. Relative imports
-    follow the usual package rules. The result must be a file the extractor
-    already parsed; anything else (third-party, stdlib, missing) returns None.
+    Absolute imports are accepted only when exactly one file matches the module
+    path under the supported roots: the repository root and each declared
+    source root (``src`` by default). There is no implicit-relative fallback
+    through the importing file's ancestors, because Python 3 does not resolve
+    absolute imports that way. A module path that matches more than one file,
+    across roots or as both ``name.py`` and ``name/__init__.py``, is ambiguous
+    and skipped. Relative imports follow the usual package rules. Anything
+    that does not resolve to a parsed repository file returns None.
     """
     parts = tuple(module.split(".")) if module else ()
 
     if level == 0:
-        bases = [Path("."), *importing_file.parents, *_source_roots(known_files)]
+        if not parts:
+            return None
+        bases = [Path("."), *(Path(root) for root in source_roots)]
     else:
         base = importing_file.parent
         for _ in range(level - 1):
             base = base.parent
         bases = [base]
 
+    matches: list[str] = []
     for base in bases:
         target = base.joinpath(*parts) if parts else base
         for candidate in (target.with_suffix(".py"), target / "__init__.py"):
             rel = candidate.as_posix()
             if rel.startswith("./"):
                 rel = rel[2:]
-            if rel in known_files:
-                return rel
-    return None
+            if rel in known_files and rel not in matches:
+                matches.append(rel)
 
-
-def _source_roots(known_files: frozenset[str]) -> tuple[Path, ...]:
-    """First-level repository directories that contain parsed Python files."""
-    roots = {Path(rel).parts[0] for rel in known_files if len(Path(rel).parts) > 1}
-    return tuple(Path(name) for name in sorted(roots))
+    if len(matches) != 1:
+        return None
+    return matches[0]
 
 
 def _cross_file_imports(
     tree: ast.Module,
     *,
-    root: Path,
     known_files: frozenset[str],
     importing_file: Path,
     by_file: dict[str, tuple[PythonSymbol, ...]],
+    source_roots: tuple[str, ...],
 ) -> dict[str, PythonSymbol]:
     """Map local alias -> imported top-level function defined in another file.
 
@@ -90,7 +94,11 @@ def _cross_file_imports(
         if not isinstance(statement, ast.ImportFrom):
             continue
         target_file = _module_file(
-            root, known_files, importing_file, statement.module, statement.level
+            known_files,
+            importing_file,
+            statement.module,
+            statement.level,
+            source_roots=source_roots,
         )
         if target_file is None or target_file == importing_rel:
             continue
@@ -112,6 +120,7 @@ def repository_hard_masked_cross_file_call_examples(
     candidate_body_chars: int = 768,
     seed: int = 0,
     strict: bool = False,
+    source_roots: Sequence[str] = ("src",),
 ) -> list[DecisionExample]:
     """Create cross-file call decisions with import-resolved exact labels.
 
@@ -129,9 +138,14 @@ def repository_hard_masked_cross_file_call_examples(
     - candidates are drawn from the whole repository, so the caller's own file
       is not privileged;
     - examples that cannot fill the candidate count are skipped.
+
+    ``source_roots`` names directories, relative to the repository root, under
+    which absolute imports may also resolve (a declared or conventional source
+    root such as ``src``). Resolution is conservative: see ``_module_file``.
     """
     if candidate_count < 2:
         raise ValueError("candidate_count must be at least 2")
+    roots = tuple(Path(root).as_posix() for root in source_roots)
 
     root_path = Path(root).resolve()
     all_symbols, by_file = collect_python_symbols(root_path, strict=strict)
@@ -151,10 +165,10 @@ def repository_hard_masked_cross_file_call_examples(
         local_names = {symbol.name for symbol in local_symbols}
         imports = _cross_file_imports(
             tree,
-            root=root_path,
             known_files=known_files,
             importing_file=Path(source_name),
             by_file=by_file,
+            source_roots=roots,
         )
         imports = {
             alias: symbol for alias, symbol in imports.items()
