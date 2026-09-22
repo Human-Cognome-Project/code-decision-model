@@ -1,4 +1,4 @@
-"""Tests for paired corrective-turn statistics (E025)."""
+"""Tests for paired corrective-turn statistics (E026)."""
 from __future__ import annotations
 
 import pytest
@@ -66,17 +66,17 @@ def _example(source: str, task: str = "python.hard_masked_direct_call") -> Decis
 # (baseline, assisted) as (success, attempts_used)
 PILOT = [
     _pair((True, 2), (True, 1)),    # both, assisted fewer
-    _pair((True, 3), (True, 2)),    # both, assisted fewer
+    _pair((True, 2), (True, 1)),    # both, assisted fewer
     _pair((True, 1), (True, 1)),    # both, same
     _pair((True, 2), (True, 2)),    # both, same
-    _pair((False, 3), (True, 1)),   # assisted only
-    _pair((False, 3), (True, 2)),   # assisted only
-    _pair((False, 3), (True, 1)),   # assisted only
-    _pair((False, 3), (True, 3)),   # assisted only
-    _pair((True, 1), (False, 3)),   # baseline only
-    _pair((False, 3), (False, 3)),  # neither
-    _pair((False, 3), (False, 3)),  # neither
-    _pair((False, 3), (False, 3)),  # neither
+    _pair((False, 2), (True, 1)),   # assisted only
+    _pair((False, 2), (True, 1)),   # assisted only
+    _pair((False, 2), (True, 1)),   # assisted only
+    _pair((False, 2), (True, 1)),   # assisted only
+    _pair((True, 1), (False, 2)),   # baseline only
+    _pair((False, 2), (False, 2)),  # neither
+    _pair((False, 2), (False, 2)),  # neither
+    _pair((False, 2), (False, 2)),  # neither
 ]
 
 
@@ -87,7 +87,7 @@ def test_summary_counts_match_hand_computed_report():
     assert summary.baseline.successes == 5
     assert summary.assisted.successes == 8
     assert summary.baseline.first_pass_successes == 2
-    assert summary.assisted.first_pass_successes == 4
+    assert summary.assisted.first_pass_successes == 7
     assert summary.baseline.terminal_failures == 7
     assert summary.assisted.terminal_failures == 4
     assert summary.both_succeed == 4
@@ -98,7 +98,7 @@ def test_summary_counts_match_hand_computed_report():
     assert summary.mean_correction_turn_delta == 0.5
     assert (summary.assisted_fewer, summary.assisted_same, summary.assisted_more) == (2, 2, 0)
     assert summary.success_rate_delta == pytest.approx(3 / 12)
-    assert summary.mean_attempts_delta == pytest.approx((30 - 25) / 12)
+    assert summary.mean_attempts_delta == pytest.approx((22 - 17) / 12)
 
 
 def test_summary_accepts_structured_edit_outcomes():
@@ -182,6 +182,16 @@ def test_cluster_bootstrap_is_deterministic_and_covers_estimate():
     assert a.lower <= a.estimate <= a.upper
     assert a.samples == 300
 
+    stratified = cluster_bootstrap_paired(
+        examples,
+        PILOT,
+        bootstrap_samples=300,
+        seed=1,
+        strata=by_namespace,
+    )
+    assert stratified.estimate == pytest.approx(3 / 12)
+    assert stratified.samples == 300
+
     turns = cluster_bootstrap_paired(
         examples, PILOT, statistic="mean_correction_turn_delta", bootstrap_samples=300
     )
@@ -216,7 +226,7 @@ def test_cluster_bootstrap_validation():
 
 def test_render_report_matches_experiment_note_shape():
     report = render_report(summarize_paired(PILOT))
-    assert "| First-pass success | 2/12 (16.7%) | 4/12 (33.3%) |" in report
+    assert "| First-pass success | 2/12 (16.7%) | 7/12 (58.3%) |" in report
     assert "| Success within budget | 5/12 (41.7%) | 8/12 (66.7%) |" in report
     assert "| Terminal failures | 7/12 | 4/12 |" in report
     assert "- both succeed: 4" in report
