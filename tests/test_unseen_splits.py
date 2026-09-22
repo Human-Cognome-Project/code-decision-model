@@ -53,7 +53,9 @@ def test_held_out_repository_is_entirely_test_and_absent_elsewhere():
 
 
 def test_retained_repositories_split_source_disjoint_with_validation():
-    dataset = split_repository_examples_unseen(POOL, held_out=["gamma"], seed=1)
+    dataset = split_repository_examples_unseen(
+        POOL, held_out=["gamma"], seed=1, validation_fraction=0.15
+    )
 
     assert _repos(dataset.validation) == {"alpha", "beta"}
     assert {"alpha", "beta", "tiny"} <= _repos(dataset.train)
@@ -70,12 +72,25 @@ def test_multiple_held_out_repositories():
 
 
 def test_small_retained_namespace_policy():
-    train_only = split_repository_examples_unseen(POOL, held_out=["alpha"])
+    train_only = split_repository_examples_unseen(
+        POOL, held_out=["alpha"], validation_fraction=0.15
+    )
     assert "tiny" in _repos(train_only.train)
     assert "tiny" not in _repos(train_only.validation)
 
     with pytest.raises(ValueError, match="tiny"):
-        split_repository_examples_unseen(POOL, held_out=["alpha"], small_namespace="error")
+        split_repository_examples_unseen(
+            POOL,
+            held_out=["alpha"],
+            validation_fraction=0.15,
+            small_namespace="error",
+        )
+
+
+def test_default_matches_frozen_e027_all_nonheldout_training():
+    dataset = split_repository_examples_unseen(POOL, held_out=["alpha"])
+    assert dataset.validation == ()
+    assert _repos(dataset.train) == {"beta", "gamma", "tiny"}
 
 
 def test_zero_validation_fraction_keeps_everything_in_train():
