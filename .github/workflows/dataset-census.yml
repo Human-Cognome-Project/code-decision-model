@@ -1,0 +1,74 @@
+name: dataset-census
+
+on:
+  push:
+    branches: ["analysis/dataset-census"]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project
+        run: python -m pip install -e . --no-deps
+      - name: Clone census repositories
+        run: |
+          mkdir -p /tmp/census
+          git clone --depth 1 https://github.com/psf/requests.git /tmp/census/requests
+          git clone --depth 1 https://github.com/pallets/click.git /tmp/census/click
+          git clone --depth 1 https://github.com/encode/httpx.git /tmp/census/httpx
+          git clone --depth 1 https://github.com/fastapi/fastapi.git /tmp/census/fastapi
+          git clone --depth 1 https://github.com/pydantic/pydantic.git /tmp/census/pydantic
+      - name: Measure extractable decisions
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from cdm.repository import (
+              collect_python_symbols,
+              iter_python_files,
+              repository_call_examples,
+              split_repository_examples,
+          )
+
+          roots = {
+              "requests": Path("/tmp/census/requests"),
+              "click": Path("/tmp/census/click"),
+              "httpx": Path("/tmp/census/httpx"),
+              "fastapi": Path("/tmp/census/fastapi"),
+              "pydantic": Path("/tmp/census/pydantic"),
+          }
+
+          report = {}
+          for name, root in roots.items():
+              files = iter_python_files(root)
+              symbols, by_file = collect_python_symbols(root)
+              examples = repository_call_examples(
+                  root,
+                  max_candidates=16,
+                  seed=0,
+              )
+              split = split_repository_examples(examples, seed=0)
+              source_count = len({e.source for e in examples})
+              answer_positions = sorted({e.answer_index for e in examples})
+              report[name] = {
+                  "python_files": len(files),
+                  "files_with_top_level_symbols": len(by_file),
+                  "top_level_symbols": len(symbols),
+                  "direct_call_examples": len(examples),
+                  "example_source_files": source_count,
+                  "train": len(split.train),
+                  "validation": len(split.validation),
+                  "test": len(split.test),
+                  "answer_positions_observed": answer_positions,
+              }
+
+          print("CENSUS_JSON=" + json.dumps(report, sort_keys=True))
+          PY
