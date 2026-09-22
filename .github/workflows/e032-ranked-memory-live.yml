@@ -244,9 +244,8 @@ jobs:
               )
               if recommendation is not None:
                   blocks.append(
-                      "Repository decision evidence for this revised choice (fallible): "
-                      f"candidate {recommendation + 1} is recommended. "
-                      "Use this as evidence for the new choice, but still verify it against the code."
+                      "Repository decision evidence (fallible): "
+                      f"candidate {recommendation + 1} is recommended."
                   )
               return "\n\n".join(blocks)
 
@@ -312,7 +311,7 @@ jobs:
                   example, first_rec, recommendation=next_rec
               )
               if next_rec is not None and not ranked_prompt_text.startswith(
-                  memory_prompt_text + "\n\nRepository decision evidence for this revised choice"
+                  memory_prompt_text + "\n\nRepository decision evidence (fallible):"
               ):
                   raise RuntimeError("ranked prompt no longer preserves E029 control prefix")
 
