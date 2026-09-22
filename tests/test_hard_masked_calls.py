@@ -89,10 +89,10 @@ def test_hard_masked_pool_excludes_caller_definition(tmp_path):
 def test_hard_masked_examples_require_full_candidate_count(tmp_path):
     _write_repo(tmp_path)
 
-    # Excluding the caller leaves only five one-argument candidates.
+    # Excluding the caller leaves only six one-argument candidates.
     assert repository_hard_masked_call_examples(
         tmp_path,
-        candidate_count=6,
+        candidate_count=7,
         seed=0,
     ) == []
 
