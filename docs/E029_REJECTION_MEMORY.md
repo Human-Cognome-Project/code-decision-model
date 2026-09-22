@@ -20,7 +20,9 @@ After a candidate is rejected by the deterministic verifier:
    recommendation from the next prompt as well;
 4. refuse a generator output that names a previously rejected candidate.
 
-The first-turn prompt is exactly the frozen E023/E027 prompt.
+In the library harness, the first-turn prompt is exactly the existing E023 prompt.
+The live E029 workflow must separately copy the historical E027 live prompt
+verbatim; the historical workflow used its own renderer rather than this helper.
 
 ## Why this is a hard constraint
 
@@ -42,11 +44,12 @@ The primary paired comparison is:
 - frozen assisted loop;
 - rejection-memory assisted loop.
 
-Both arms receive the same recommendation and the same first-turn prompt.
+Both live arms receive the same recommendation and share one identical first-turn
+generation produced from the historical E027 prompt.
 
 ## Expected invariants
 
-- first-pass behavior must be identical between arms;
+- first-pass behavior must be identical between arms and reproduce E027;
 - scorer training and recommendation indices remain unchanged;
 - generator model/revision and greedy decoding remain unchanged;
 - maximum attempts remains two;
