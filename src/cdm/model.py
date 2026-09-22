@@ -23,6 +23,46 @@ class EncodedDecisionContext:
     question: torch.Tensor
 
 
+def _broadcast_decision_inputs(
+    context: torch.Tensor,
+    question: torch.Tensor,
+    candidates: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Broadcast one or many decision contexts across their candidate axis.
+
+    Supported shapes:
+    - single decision: context/question [D], candidates [K, D];
+    - batch: context/question [B, D], candidates [B, K, D].
+    """
+    if candidates.ndim == 2:
+        if context.ndim != 1 or question.ndim != 1:
+            raise ValueError("single-decision context and question must be 1D")
+        if (
+            context.shape[0] != candidates.shape[1]
+            or question.shape[0] != candidates.shape[1]
+        ):
+            raise ValueError("decision embedding dimensions must match")
+        return (
+            context.unsqueeze(0).expand(candidates.shape[0], -1),
+            question.unsqueeze(0).expand(candidates.shape[0], -1),
+            candidates,
+        )
+
+    if candidates.ndim == 3:
+        batch, count, dim = candidates.shape
+        if context.shape != (batch, dim) or question.shape != (batch, dim):
+            raise ValueError(
+                "batched context/question must have shape [batch, embedding_dim]"
+            )
+        return (
+            context.unsqueeze(1).expand(-1, count, -1),
+            question.unsqueeze(1).expand(-1, count, -1),
+            candidates,
+        )
+
+    raise ValueError("candidate embeddings must be 2D or 3D")
+
+
 class PairwiseMLPScorer(nn.Module):
     """Original expressive scorer over pairwise context/question/candidate features."""
 
@@ -42,9 +82,11 @@ class PairwiseMLPScorer(nn.Module):
         question: torch.Tensor,
         candidates: torch.Tensor,
     ) -> torch.Tensor:
-        c = context.expand(candidates.shape[0], -1)
-        q = question.expand(candidates.shape[0], -1)
-        a = candidates
+        c, q, a = _broadcast_decision_inputs(
+            context,
+            question,
+            candidates,
+        )
         features = torch.cat(
             [
                 c,
@@ -82,16 +124,13 @@ class CosineMixScorer(nn.Module):
         question: torch.Tensor,
         candidates: torch.Tensor,
     ) -> torch.Tensor:
-        context_scores = F.cosine_similarity(
+        c, q, a = _broadcast_decision_inputs(
+            context,
+            question,
             candidates,
-            context.expand_as(candidates),
-            dim=-1,
         )
-        question_scores = F.cosine_similarity(
-            candidates,
-            question.expand_as(candidates),
-            dim=-1,
-        )
+        context_scores = F.cosine_similarity(a, c, dim=-1)
+        question_scores = F.cosine_similarity(a, q, dim=-1)
         mix = torch.sigmoid(self.mix_logit)
         scale = torch.exp(torch.clamp(self.log_scale, min=-5.0, max=5.0))
         return scale * (
@@ -170,6 +209,15 @@ class CodeDecisionModel(nn.Module):
             decision_context.question,
             candidate_embeddings,
         )
+
+    def score_encoded_batch(
+        self,
+        contexts: torch.Tensor,
+        questions: torch.Tensor,
+        candidate_embeddings: torch.Tensor,
+    ) -> torch.Tensor:
+        """Score a batch of equal-cardinality encoded decisions."""
+        return self.scorer(contexts, questions, candidate_embeddings)
 
     def forward(self, code_context: str, question: str, candidates: Sequence[str]) -> torch.Tensor:
         dc = self.encode_context(code_context, question)
