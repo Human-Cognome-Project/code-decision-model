@@ -73,3 +73,15 @@ Default smoke pin matches the completed live pilot: `Qwen/Qwen2.5-Coder-0.5B-Ins
 If the assisted condition reduces corrections on this bridge task, the next step
 is machine-generated mutations with real test/compiler feedback rather than
 immediately enlarging models.
+
+
+## Live result
+
+The first live Qwen2.5-Coder-0.5B-Instruct pilot is complete.
+
+See [E022_LIVE_QWEN_RESULT.md](E022_LIVE_QWEN_RESULT.md).
+
+Neither baseline nor assisted condition produced a deterministically valid repair
+on the 12 held-out pilot tasks. E022 therefore reached a generator-validity floor
+and did not produce a correction-turn comparison. E023 moves to a structured edit
+intent so the selection question can be measured without full-function generation.
