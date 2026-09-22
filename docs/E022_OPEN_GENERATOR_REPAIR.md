@@ -60,8 +60,7 @@ do worse than baseline; the harness does not assume benefit.
   (downloads weights; not part of default CI).
 - Unit tests inject fakes; no network in `pytest`.
 
-Default smoke pin: `Salesforce/codegen-350M-mono` (replace with any pinned
-open causal code model when running the real held-out experiment).
+Default smoke pin matches the completed live pilot: `Qwen/Qwen2.5-Coder-0.5B-Instruct` at revision `ea3f2471cf1b1f0db85067f1ef93848e38e88c25`. The adapter uses the model chat template and a strict repair-only system instruction.
 
 ## Out of scope for E022
 
