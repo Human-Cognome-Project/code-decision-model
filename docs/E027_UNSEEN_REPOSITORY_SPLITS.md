@@ -13,13 +13,16 @@ the next gate. E027 adds the missing split.
 
 ```text
 held_out repositories       -> test, in full
-every other repository      -> train / validation, balanced source-disjoint
-                               inside each namespace (E007 inside E009)
+every other repository      -> train, in full by default
+optional retained validation -> source-disjoint inside each namespace when
+                               explicitly requested
 ```
 
 Nothing from a held-out repository is available for scorer training,
-validation, or threshold selection. Retained repositories with a single source
-file follow the E009 small-namespace policy (train only, or reject).
+validation, or threshold selection. The default uses all non-held-out examples
+for training because E027 freezes the E025 hyperparameters and performs no
+validation selection. A non-zero retained-repository validation fraction remains
+available for future protocols.
 
 `verify_unseen_repository_split` is a machine-checkable guard: it raises if any
 test namespace also appears in train or validation. A live run should call it
