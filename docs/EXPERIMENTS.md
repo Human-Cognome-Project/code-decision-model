@@ -55,3 +55,10 @@ correction loop.
 Companion example:
 [E021_CORRECTIVE_TURN_MOCK.md](E021_CORRECTIVE_TURN_MOCK.md) exercises the
 paired measurement path with deterministic mock generators and no model download.
+
+## E022 — Open generator on the corrective-turn harness
+
+See [E022_OPEN_GENERATOR_REPAIR.md](E022_OPEN_GENERATOR_REPAIR.md).
+
+First live open-generator experiment on the E021 harness. Reserved for a pinned
+real model; the mock path lives under E021.
