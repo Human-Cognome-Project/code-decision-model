@@ -41,27 +41,24 @@ The live test should isolate **post-rejection evidence**:
 
 Stop E032 if the live ranked arm does not materially beat E029 on wrong-recommendation tasks.
 
-## E033 — call-expression intent
+## E033 — call-expression intent (stopped at validity gate)
 
-E033 is the next generation-surface experiment.
+The baseline-only 64-task validity pilot produced:
 
-The generator emits exactly one Python call expression; deterministic code checks:
+- 36/64 parse-valid call expressions (56.3%);
+- 23/64 uniquely resolved and bindable calls (35.9%);
+- 2/64 exact repairs (3.1%).
 
-1. parse validity;
-2. unique candidate membership;
-3. E024 bindability;
-4. AST equivalence with the machine-labelled repair.
+The failures were mostly bare symbols, partial signatures, retained placeholders,
+wrong targets, or wrong arguments. A permissive deterministic parser that
+reconstructed omitted calls or arguments would collapse the task back toward
+index selection and would not be a valid rescue.
 
-High-value live measurements:
+Do not proceed to a full paired E033 run with this generator/prompt surface.
 
-- first-pass parse/bindability validity;
-- success within the frozen attempt budget;
-- baseline vs assisted corrective burden;
-- failure split among invalid expression, ambiguous/unknown target, unbindable call, wrong target, and wrong arguments.
-
-Keep E029/E032 memory out of the first E033 live run so generation validity and decision assistance remain separable.
-
-Stop the structured-code direction if a single call expression still cannot cross a useful validity floor.
+A successor should constrain the action space structurally rather than rely on
+free-form call text. Useful possibilities include a narrow AST-operation schema
+that separates target choice from explicit argument operations.
 
 ## Second-generator replication
 
