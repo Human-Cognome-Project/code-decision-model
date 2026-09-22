@@ -129,3 +129,18 @@ to test and all other repositories train by default, with an optional
 source-disjoint retained validation split, a machine-checkable leakage guard, and
 a leave-one-repository-out rotation whose
 folds pool under E026 statistics.
+
+
+### E027 live result
+
+See [E027_LEAVE_ONE_REPOSITORY_OUT_RESULT.md](E027_LEAVE_ONE_REPOSITORY_OUT_RESULT.md).
+
+Across all 400 examples in leave-one-repository-out rotation, success within two
+attempts increased from 202/400 (50.5%) baseline to 289/400 (72.3%) assisted.
+The paired micro delta was +21.75 percentage points; exact McNemar p ≈ 4.96e-12,
+and the repository-stratified source-file bootstrap 95% interval was +14.37 to
++27.67 points. Every held-out repository fold was positive.
+
+The next gate is development-independent replication on a second pinned repository
+set. Current exploratory directions are tracked in
+[OPEN_DIRECTIONS.md](OPEN_DIRECTIONS.md).
