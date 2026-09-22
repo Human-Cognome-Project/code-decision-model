@@ -884,6 +884,140 @@ def split_repository_examples_by_namespace(
     )
 
 
+def dataset_namespaces(examples: Iterable[DecisionExample]) -> frozenset[str]:
+    """Repository namespaces present in a sequence of namespaced examples."""
+    namespaces: set[str] = set()
+    for example in examples:
+        if example.source is None or "::" not in example.source:
+            raise ValueError("namespace operations require namespaced source provenance")
+        namespaces.add(example.source.split("::", 1)[0])
+    return frozenset(namespaces)
+
+
+def verify_unseen_repository_split(dataset: RepositoryDataset) -> frozenset[str]:
+    """Assert that no test repository appears in train or validation.
+
+    Returns the held-out namespaces. Intended as a guard before any live
+    unseen-repository run, including on datasets reloaded from disk.
+    """
+    seen = dataset_namespaces(dataset.train) | dataset_namespaces(dataset.validation)
+    held_out = dataset_namespaces(dataset.test)
+    if not held_out:
+        raise ValueError("unseen-repository split has no test examples")
+    leaked = sorted(seen & held_out)
+    if leaked:
+        raise ValueError(f"held-out repositories leak into training: {leaked}")
+    return held_out
+
+
+def split_repository_examples_unseen(
+    examples: Iterable[DecisionExample],
+    *,
+    held_out: Iterable[str],
+    seed: int = 0,
+    validation_fraction: float = 0.15,
+    small_namespace: str = "train",
+) -> RepositoryDataset:
+    """Hold out entire repositories for an unseen-repository evaluation.
+
+    Every example whose namespace is in ``held_out`` becomes test data. The
+    remaining repositories are split into train and validation with the E007
+    balanced source-group splitter applied inside each namespace (E009), so no
+    source file crosses partitions and every retained repository contributes to
+    validation when it has enough source groups.
+
+    Nothing from a held-out repository is available for scorer training,
+    validation, or threshold selection. This is the split the E025 next gate
+    asks for.
+    """
+    if not 0.0 <= validation_fraction < 1.0:
+        raise ValueError("validation_fraction must be between 0 and 1")
+    if small_namespace not in {"train", "error"}:
+        raise ValueError("small_namespace must be 'train' or 'error'")
+
+    held = frozenset(held_out)
+    if not held:
+        raise ValueError("at least one held-out namespace is required")
+
+    materialized = tuple(examples)
+    present = dataset_namespaces(materialized)
+    missing = sorted(held - present)
+    if missing:
+        raise ValueError(f"held-out namespaces not present in examples: {missing}")
+    if held >= present:
+        raise ValueError("holding out every repository leaves nothing to train on")
+
+    test: list[DecisionExample] = []
+    strata: dict[str, list[DecisionExample]] = {}
+    for example in materialized:
+        namespace = example.source.split("::", 1)[0]
+        if namespace in held:
+            test.append(example)
+        else:
+            strata.setdefault(namespace, []).append(example)
+
+    train: list[DecisionExample] = []
+    validation: list[DecisionExample] = []
+    for namespace in sorted(strata):
+        stratum = strata[namespace]
+        if validation_fraction == 0.0:
+            train.extend(stratum)
+            continue
+        source_count = len({example.source for example in stratum})
+        if source_count < 2:
+            if small_namespace == "error":
+                raise ValueError(
+                    f"namespace {namespace!r} has {source_count} source group; need 2"
+                )
+            train.extend(stratum)
+            continue
+        # A two-way balanced split: the splitter's mandatory "test" bucket is
+        # used as the validation partition here.
+        split = split_repository_examples_balanced(
+            stratum,
+            seed=seed,
+            train_fraction=1.0 - validation_fraction,
+            validation_fraction=0.0,
+        )
+        train.extend(split.train)
+        validation.extend(split.test)
+
+    return RepositoryDataset(
+        train=tuple(train),
+        validation=tuple(validation),
+        test=tuple(test),
+    )
+
+
+def leave_one_repository_out(
+    examples: Iterable[DecisionExample],
+    *,
+    seed: int = 0,
+    validation_fraction: float = 0.15,
+    small_namespace: str = "train",
+) -> dict[str, RepositoryDataset]:
+    """One unseen-repository split per namespace, keyed by the held-out namespace.
+
+    Paired outcomes from every fold can be pooled: each task is evaluated exactly
+    once, by a scorer that never saw its repository. Report pooled results with
+    repository strata (E026) so the folds remain visible.
+    """
+    materialized = tuple(examples)
+    namespaces = dataset_namespaces(materialized)
+    if len(namespaces) < 2:
+        raise ValueError("leave-one-repository-out needs at least two repositories")
+    return {
+        namespace: split_repository_examples_unseen(
+            materialized,
+            held_out=(namespace,),
+            seed=seed,
+            validation_fraction=validation_fraction,
+            small_namespace=small_namespace,
+        )
+        for namespace in sorted(namespaces)
+    }
+
+
 def write_jsonl_dataset(dataset: RepositoryDataset, output_dir: str | Path) -> dict[str, Path]:
     """Write train/validation/test JSONL files and return their paths."""
     out = Path(output_dir)

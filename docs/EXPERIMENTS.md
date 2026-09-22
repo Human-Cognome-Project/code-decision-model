@@ -119,3 +119,12 @@ repository-stratified source-file bootstrap 95% interval was +2.7 to +32.8 point
 
 This confirms the E023 pilot on the current same-repository held-out split. The
 next gate is unseen-repository replication.
+
+## E027 — Unseen-repository holdout splits
+
+See [E027_UNSEEN_REPOSITORY_SPLITS.md](E027_UNSEEN_REPOSITORY_SPLITS.md).
+
+Adds the split the E025 next gate requires: held-out repositories go entirely
+to test, the rest are split source-disjoint for train/validation, with a
+machine-checkable leakage guard and a leave-one-repository-out rotation whose
+folds pool under E026 statistics.
