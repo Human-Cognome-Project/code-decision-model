@@ -1,81 +1,125 @@
 # Open exploratory directions
 
-This document is for agents and contributors looking for useful work after E027.
-It is **not** a commitment to pursue every item. The current primary gate remains
-development-independent replication on a second pinned repository set.
+E031 has now passed the preregistered development-independent replication gate. This document therefore tracks work **after** independent replication rather than treating it as still pending.
 
-## Primary next gate
+## Completed foundations
 
-### Second pinned repository set
+### E031 — independent replication
 
-Select and pin a fresh set of repositories that has not influenced architecture,
-encoder choice, scorer shape, prompting, or thresholds.
+The frozen E027 intervention replicated on 421 tasks from AlphaFold, Pyodide, Optuna, and pytest:
 
-Before looking at the primary result:
+- baseline success: 200/421 (47.5%);
+- assisted success: 287/421 (68.2%);
+- paired delta: +20.67 pp;
+- exact McNemar p = 1.29e-11;
+- repository-stratified source-file bootstrap 95% CI: +13.97 to +27.46 pp.
 
-- freeze the E027 Qwen revision and decoding;
-- freeze the structured candidate-output parser;
-- freeze the two-attempt budget;
-- freeze the CodeRank + PairwiseMLP scorer recipe;
-- predeclare E026 paired statistics;
-- record repository revisions and extraction counts.
+This closes the main development-leakage concern left by E027. Do not retune this result.
 
-This is the highest-value near-term contribution.
+### E028/E029 — failure mechanism and rejection memory
 
-## Exploratory directions
+E028 showed that first-turn recommendation following is effectively deterministic under the frozen index protocol and that remaining assisted failures begin with wrong recommendations.
 
-### Harder deterministic decision types
+E029 then removed verifier-rejected candidates from the correction turn. It nearly eliminated immediate repetition of the rejected choice but did not materially improve final success: 289/400 -> 292/400, clustered 95% CI -0.96 to +2.32 pp.
 
-Move beyond same-file masked call recovery while preserving machine-verifiable
-labels. Candidate sources include:
+Do not spend cycles prompt-tuning E029 on the development repositories.
+
+## Active direction — E032 ranked feasible re-recommendation
+
+The scorer-only probe found useful residual signal:
+
+- rank 2 correct on 77/164 top-1 errors (47.0%);
+- E024 gating changed only 1/400 first recommendations;
+- scorer-implied two-turn ceiling: 313/400 (78.25%).
+
+The live test should isolate **post-rejection evidence**:
+
+1. keep the historical first turn unchanged;
+2. deterministically remove the rejected candidate;
+3. compare E029's no-recommendation correction turn with E032's next-feasible ranked recommendation;
+4. use the same two-attempt budget.
+
+Stop E032 if the live ranked arm does not materially beat E029 on wrong-recommendation tasks.
+
+## E033 — call-expression intent
+
+E033 is the next generation-surface experiment.
+
+The generator emits exactly one Python call expression; deterministic code checks:
+
+1. parse validity;
+2. unique candidate membership;
+3. E024 bindability;
+4. AST equivalence with the machine-labelled repair.
+
+High-value live measurements:
+
+- first-pass parse/bindability validity;
+- success within the frozen attempt budget;
+- baseline vs assisted corrective burden;
+- failure split among invalid expression, ambiguous/unknown target, unbindable call, wrong target, and wrong arguments.
+
+Keep E029/E032 memory out of the first E033 live run so generation validity and decision assistance remain separable.
+
+Stop the structured-code direction if a single call expression still cannot cross a useful validity floor.
+
+## Second-generator replication
+
+Now that E031 is complete, repeat the **frozen E031 intervention** with another compact open generator.
+
+The purpose is not to improve Qwen's result. It is to measure generator dependence.
+
+Freeze:
+
+- repository set and revisions;
+- decision scorer recipe;
+- structured index protocol;
+- parser;
+- attempt budget;
+- deterministic statistics.
+
+A second generator may use GPU for practical throughput, but hardware must not change the decoding semantics.
+
+## Harder deterministic decision types
+
+E030 establishes one cross-file task. Further useful targets include:
 
 - LSP symbol/reference resolution;
-- cross-file callable selection;
-- type-checker or compiler diagnostic resolution;
+- compiler/type-checker diagnostic resolution;
 - import/module selection;
-- deterministic API compatibility checks;
+- deterministic API compatibility;
 - mutation/test outcomes.
 
-A new task should have a clear verifier before model work begins.
+A task needs a deterministic verifier before model work begins.
 
-### Structured patch intent
+## Repository-scale retrieval
 
-E022 showed that free-form whole-function regeneration can fail before the
-decision layer is meaningfully tested. Explore intermediate edit forms richer than
-a candidate index but still deterministic to apply and verify, for example:
+Test a two-stage path:
 
-- replace-symbol operations;
-- argument insertion/removal/reordering;
-- import edits;
-- narrow AST rewrite templates.
+1. independent/cacheable retrieval or shortlisting;
+2. decision-model reranking.
 
-The objective is to expand repair expressiveness without reintroducing an
-uncontrolled text-generation bottleneck.
+Measure separately:
 
-### Repository-scale candidate retrieval
+- target recall after retrieval;
+- reranking accuracy;
+- end-to-end corrective burden.
 
-The architecture assumes repository representations and candidate embeddings can
-be cached. Test a two-stage path:
+Do not hide retrieval misses inside decision accuracy.
 
-1. deterministic or embedding retrieval/shortlisting;
-2. decision-model reranking over the shortlist.
+## Confidence and escalation
 
-Measure recall of the true candidate separately from decision accuracy and
-end-to-end corrective burden.
+E020 falsified raw Potion cosine margin as a useful general routing signal.
 
-### Deterministic constraints in the live loop
+More useful options include:
 
-E019/E024 provide hard filtering machinery. Measure whether real AST/LSP/type
-constraints improve the E027-style corrective loop when applied before the
-generator sees the recommendation.
+- calibrated decision-head confidence on unseen repositories;
+- agreement between independent hard constraints and neural ranking;
+- abstention evaluated without tuning on E027/E031 test repositories.
 
-Report both candidate elimination and end-to-end effect; do not count filtering
-alone as success.
+## Leaner decision path
 
-### Leaner decision path
-
-E016/E017 showed that representation quality matters more than merely shrinking
-the scorer. Revisit cost only against the frozen end-to-end protocol:
+Explore smaller/cheaper representations only against a frozen end-to-end effect:
 
 - smaller encoders;
 - quantized/static embeddings;
@@ -83,55 +127,26 @@ the scorer. Revisit cost only against the frozen end-to-end protocol:
 - simpler heads;
 - cached repository representations.
 
-A cheaper model is useful only if the corrective-burden effect is preserved.
+A cheaper path is useful only if corrective-burden performance survives.
 
-### Confidence and escalation
+## Lower-value directions
 
-E020 found that raw Potion cosine margin did **not** generalize as an escalation
-signal. New confidence work should therefore use stronger held-out/OOD calibration
-and should not simply retune the failed margin threshold.
+Avoid:
 
-Useful targets include:
-
-- calibrated decision-head confidence;
-- agreement between independent deterministic constraints and neural ranking;
-- abstention criteria evaluated on unseen repositories.
-
-### Failure-conditioned analysis
-
-Use E027 records to characterize where assistance still fails:
-
-- wrong decision recommendation;
-- generator ignores a correct recommendation;
-- second attempt fails after deterministic feedback;
-- repository/task-family differences.
-
-Analysis should produce a falsifiable next experiment rather than only taxonomy.
-
-### Second generator replication
-
-After the development-independent repository replication, repeat the frozen
-decision intervention with another compact open generator. This tests whether the
-effect depends on Qwen-specific instruction following.
-
-Do not substitute generator swapping for the new-repository gate.
-
-## Directions currently lower value
-
-Avoid spending cycles on:
-
-- larger decision heads without an end-to-end reason;
-- more tuning on the existing four repositories;
-- raw Potion-margin routing already falsified by E020;
+- larger heads without an end-to-end reason;
+- more tuning on E027 repositories;
+- retuning E031 after the confirmatory result;
+- further prompt tuning of E029;
+- raw Potion-margin routing;
 - general agent loops;
 - soft preferences or LLM-generated supervision where deterministic labels exist;
-- free-form patch generation without a deterministic measurement bridge.
+- free-form patch generation without deterministic verification.
 
 ## Contribution rule
 
 An exploratory PR should state:
 
-1. which open question it tests;
-2. what deterministic success/failure signal is used;
-3. what existing result it is compared against;
-4. what outcome would cause the direction to be abandoned.
+1. the open question;
+2. the deterministic success/failure signal;
+3. the comparison baseline;
+4. the outcome that would stop the direction.

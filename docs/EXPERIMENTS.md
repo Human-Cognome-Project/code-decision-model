@@ -141,9 +141,7 @@ The paired micro delta was +21.75 percentage points; exact McNemar p ≈ 4.96e-1
 and the repository-stratified source-file bootstrap 95% interval was +14.37 to
 +27.67 points. Every held-out repository fold was positive.
 
-The next gate is development-independent replication on a second pinned repository
-set. Current exploratory directions are tracked in
-[OPEN_DIRECTIONS.md](OPEN_DIRECTIONS.md).
+The development-independent replication gate was completed in E031. Current exploratory directions are tracked in [OPEN_DIRECTIONS.md](OPEN_DIRECTIONS.md).
 
 
 ## E028 — Failure-conditioned structured-selection analysis
@@ -163,7 +161,13 @@ The preserved E027 task records show that the assisted generator followed the de
 
 See [E029_REJECTION_MEMORY.md](E029_REJECTION_MEMORY.md).
 
-Motivated by E028: after the deterministic verifier rejects a candidate, remove that candidate from the next-turn choice set and remove any recommendation pointing to it. The intervention begins only after deterministic rejection; the live run preserves the exact historical E027 first-turn prompt. The experiment asks whether this hard correction-memory rule improves two-attempt success on wrong-recommendation tasks.
+Motivated by E028: after the deterministic verifier rejects a candidate, remove that candidate from the next-turn choice set and remove any recommendation pointing to it. The intervention begins only after deterministic rejection; the live run preserves the exact historical E027 first-turn prompt.
+
+### E029 live result
+
+See [E029_REJECTION_MEMORY_RESULT.md](E029_REJECTION_MEMORY_RESULT.md).
+
+The intervention nearly eliminated immediate repetition of a rejected candidate but did not materially improve final success: 289/400 frozen assisted versus 292/400 with rejection memory (+0.75 pp), with a repository-stratified source-file bootstrap 95% interval of -0.96 to +2.32 pp. On wrong-recommendation tasks, paired McNemar p = 0.6072. E029 therefore fixes the narrow repetition symptom without a meaningful end-to-end gain.
 
 ## E030 — Import-resolved cross-file call supervision
 
@@ -195,6 +199,12 @@ See [E031_EXTRACTION_SELECTION.md](E031_EXTRACTION_SELECTION.md).
 
 The preregistered extraction-only census found all eight candidates eligible. The fixed first-four rule therefore selects AlphaFold (26 tasks), Pyodide (53), Optuna (134), and pytest (208): 421 tasks across 108 source files. No scorer or generator result was inspected before this selection was fixed.
 
+### E031 live result
+
+See [E031_INDEPENDENT_REPLICATION_RESULT.md](E031_INDEPENDENT_REPLICATION_RESULT.md).
+
+The frozen protocol replicated on all 421 tasks: baseline success within two attempts was 200/421 (47.5%) and assisted success was 287/421 (68.2%), a paired gain of +20.67 percentage points. Exact McNemar p = 1.29e-11 and the repository-stratified source-file bootstrap 95% interval was +13.97 to +27.46 points. The preregistered confirmatory gate passed, and every repository fold was positive.
+
 ## E032 — Ranked feasible re-recommendation
 
 See [E032_RANKED_REJECTION_MEMORY.md](E032_RANKED_REJECTION_MEMORY.md).
@@ -209,6 +219,12 @@ Mock:
 ```bash
 python examples/run_ranked_memory_mock.py
 ```
+
+### E032 scorer-ranking probe
+
+See [E032_RANKING_PROBE_RESULT.md](E032_RANKING_PROBE_RESULT.md).
+
+The frozen E027 scorer reproduced 236/400 top-1 correct decisions. On its 164 top-1 errors, rank 2 was correct 77 times (47.0%). The scorer-implied two-turn ceiling is 313/400 (78.25%), compared with 292/400 observed under E029. This passes the cheap falsifier and justifies the separate live post-rejection ranked-memory test.
 
 ## E033 — Call-expression intent
 
