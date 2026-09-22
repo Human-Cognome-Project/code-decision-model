@@ -3,6 +3,7 @@
 E032 asks whether the decision scorer still contains useful residual information after its top choice is wrong. Before spending another live generator run, the frozen E027 scorer was recomputed on the original four development repositories and its full candidate ranking was measured.
 
 No generator inference was used in this probe.
+The live post-rejection generator comparison is a separate experiment and is not part of this result.
 
 ## Provenance
 
