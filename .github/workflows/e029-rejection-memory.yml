@@ -1,0 +1,576 @@
+name: e029-rejection-memory
+
+on:
+  push:
+    branches: ["analysis/e029-rejection-memory-live"]
+
+jobs:
+  benchmark:
+    strategy:
+      fail-fast: false
+      matrix:
+        heldout: [browser-use, crawl4ai, markitdown, scrapling]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Restore model cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: e025-qwen05-coderank-${{ runner.os }}-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install model dependencies
+        run: python -m pip install -e ".[hf,coderank]"
+      - name: Clone exact benchmark revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"
+            sha="$2"
+            dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/recent
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/recent/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/recent/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/recent/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/recent/scrapling
+      - name: Run rejection-memory fold
+        env:
+          HELDOUT_REPO: ${{ matrix.heldout }}
+        run: |
+          python - <<'PY'
+          import gc
+          import json
+          import math
+          import os
+          import re
+          import statistics
+          import time
+          from collections import Counter
+
+          import torch
+          from transformers import AutoModelForCausalLM, AutoTokenizer
+
+          from cdm import CodeDecisionModel, CodeRankEncoder, PairwiseMLPScorer
+          from cdm.focus import focus_hard_call_context
+          from cdm.methods import repository_hard_masked_method_call_examples
+          from cdm.repository import (
+              namespace_repository_examples,
+              repository_hard_masked_call_examples,
+          )
+          from cdm.training import collate_encoded_examples, preencode_examples
+
+          REPOS = {
+              "browser-use": "/tmp/recent/browser-use",
+              "crawl4ai": "/tmp/recent/crawl4ai",
+              "markitdown": "/tmp/recent/markitdown",
+              "scrapling": "/tmp/recent/scrapling",
+          }
+          EXPECTED = {
+              "browser-use": {
+                  "test": 210, "rec_correct": 133, "frozen_success": 158,
+                  "frozen_second": {"correct": 25, "repeat": 12, "other_wrong": 40, "invalid": 0},
+              },
+              "crawl4ai": {
+                  "test": 160, "rec_correct": 83, "frozen_success": 107,
+                  "frozen_second": {"correct": 24, "repeat": 8, "other_wrong": 45, "invalid": 0},
+              },
+              "markitdown": {
+                  "test": 17, "rec_correct": 11, "frozen_success": 14,
+                  "frozen_second": {"correct": 3, "repeat": 0, "other_wrong": 3, "invalid": 0},
+              },
+              "scrapling": {
+                  "test": 13, "rec_correct": 9, "frozen_success": 10,
+                  "frozen_second": {"correct": 1, "repeat": 0, "other_wrong": 3, "invalid": 0},
+              },
+          }
+          HELDOUT = os.environ["HELDOUT_REPO"]
+          MODEL_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+          MODEL_REVISION = "ea3f2471cf1b1f0db85067f1ef93848e38e88c25"
+          K = 4
+          BODY_CHARS = 512
+
+          def repo_of(example):
+              return example.source.split("::", 1)[0]
+
+          def task_kind(example):
+              return "method" if "same_class" in example.task else "function"
+
+          pooled = []
+          extraction = {}
+          for name, root in REPOS.items():
+              funcs = repository_hard_masked_call_examples(
+                  root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0,
+              )
+              methods = repository_hard_masked_method_call_examples(
+                  root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0,
+              )
+              extraction[name] = {"functions": len(funcs), "methods": len(methods)}
+              pooled.extend(namespace_repository_examples(funcs, name))
+              pooled.extend(namespace_repository_examples(methods, name))
+
+          expected_extraction = {
+              "browser-use": {"functions": 68, "methods": 142},
+              "crawl4ai": {"functions": 65, "methods": 95},
+              "markitdown": {"functions": 11, "methods": 6},
+              "scrapling": {"functions": 2, "methods": 11},
+          }
+          if extraction != expected_extraction:
+              raise RuntimeError(f"extraction drift: {extraction!r}")
+
+          train_examples = [e for e in pooled if repo_of(e) != HELDOUT]
+          test_examples = [e for e in pooled if repo_of(e) == HELDOUT]
+          if len(test_examples) != EXPECTED[HELDOUT]["test"]:
+              raise RuntimeError(
+                  f"test-count drift for {HELDOUT}: {len(test_examples)} "
+                  f"!= {EXPECTED[HELDOUT]['test']}"
+              )
+
+          train_focus = [focus_hard_call_context(e, radius_lines=0) for e in train_examples]
+          test_focus = [focus_hard_call_context(e, radius_lines=0) for e in test_examples]
+
+          encoder = CodeRankEncoder(max_length=512, normalize_embeddings=False)
+          shell = CodeDecisionModel(
+              encoder=encoder,
+              dim=encoder.dim,
+              scorer=PairwiseMLPScorer(encoder.dim, hidden=32),
+          )
+          encoded = preencode_examples(
+              shell, [*train_focus, *test_focus], batch_size=8,
+          )
+          n_train = len(train_focus)
+          encoded_train = encoded[:n_train]
+          encoded_test = encoded[n_train:]
+
+          torch.manual_seed(2)
+          shell.scorer = PairwiseMLPScorer(encoder.dim, hidden=32)
+          optimizer = torch.optim.AdamW(
+              shell.scorer.parameters(), lr=1e-3, weight_decay=1e-2,
+          )
+          order = torch.randperm(
+              len(encoded_train),
+              generator=torch.Generator().manual_seed(20001),
+          ).tolist()
+          shell.scorer.train()
+          for start in range(0, len(order), 32):
+              ids = order[start:start + 32]
+              batch = collate_encoded_examples([encoded_train[i] for i in ids])
+              optimizer.zero_grad(set_to_none=True)
+              logits = shell.score_encoded_batch(
+                  batch.contexts, batch.questions, batch.candidate_embeddings,
+              )
+              loss = torch.nn.functional.cross_entropy(logits, batch.targets)
+              loss.backward()
+              torch.nn.utils.clip_grad_norm_(shell.scorer.parameters(), 1.0)
+              optimizer.step()
+
+          shell.scorer.eval()
+          recommendations = []
+          with torch.no_grad():
+              for item in encoded_test:
+                  recommendations.append(
+                      int(shell.score_encoded(
+                          item.decision_context, item.candidate_embeddings,
+                      ).argmax())
+                  )
+
+          rec_correct = sum(
+              pred == example.answer_index
+              for pred, example in zip(recommendations, test_examples)
+          )
+          if rec_correct != EXPECTED[HELDOUT]["rec_correct"]:
+              raise RuntimeError(
+                  f"recommendation drift for {HELDOUT}: {rec_correct} "
+                  f"!= {EXPECTED[HELDOUT]['rec_correct']}"
+              )
+
+          del encoded_train, encoded_test, encoded, shell, encoder, optimizer
+          gc.collect()
+
+          tokenizer = AutoTokenizer.from_pretrained(
+              MODEL_ID, revision=MODEL_REVISION,
+          )
+          model = AutoModelForCausalLM.from_pretrained(
+              MODEL_ID, revision=MODEL_REVISION, torch_dtype=torch.float32,
+          )
+          model.eval()
+
+          def frozen_prompt(example, recommendation, feedback):
+              blocks = [
+                  "Choose the one candidate that should replace __CALL_TARGET__.",
+                  "Return only one digit: 1, 2, 3, or 4. Do not return code or explanation.",
+                  "Caller:\n" + example.context,
+              ]
+              for i, candidate in enumerate(example.candidates):
+                  blocks.append(f"Candidate {i + 1}:\n{candidate}")
+              if recommendation is not None:
+                  blocks.append(
+                      "Repository decision evidence (fallible): "
+                      f"candidate {recommendation + 1} is recommended."
+                  )
+              if feedback:
+                  blocks.append(feedback)
+              return "\n\n".join(blocks)
+
+          def memory_prompt(example, recommendation, rejected, feedback):
+              active = [i for i in range(len(example.candidates)) if i != rejected]
+              allowed = ", ".join(str(i + 1) for i in active)
+              blocks = [
+                  "Choose the one candidate that should replace __CALL_TARGET__.",
+                  f"Return only one digit from: {allowed}. Do not return code or explanation.",
+                  "Caller:\n" + example.context,
+              ]
+              for i in active:
+                  blocks.append(f"Candidate {i + 1}:\n{example.candidates[i]}")
+              if recommendation is not None and recommendation != rejected:
+                  blocks.append(
+                      "Repository decision evidence (fallible): "
+                      f"candidate {recommendation + 1} is recommended."
+                  )
+              if feedback:
+                  blocks.append(feedback)
+              blocks.append(
+                  f"Candidate {rejected + 1} was rejected by the deterministic verifier "
+                  "and is no longer eligible."
+              )
+              return "\n\n".join(blocks)
+
+          choice_re = re.compile(
+              r"^(?:candidate\s*)?([1-4])(?:[.)]?)$",
+              re.IGNORECASE,
+          )
+
+          def generate_choice(prompt):
+              messages = [
+                  {
+                      "role": "system",
+                      "content": (
+                          "You are a precise code decision engine. "
+                          "Answer only with the requested candidate digit."
+                      ),
+                  },
+                  {"role": "user", "content": prompt},
+              ]
+              rendered = tokenizer.apply_chat_template(
+                  messages, tokenize=False, add_generation_prompt=True,
+              )
+              inputs = tokenizer(rendered, return_tensors="pt")
+              t0 = time.perf_counter()
+              with torch.inference_mode():
+                  output = model.generate(
+                      **inputs,
+                      max_new_tokens=8,
+                      do_sample=False,
+                      num_beams=1,
+                      pad_token_id=tokenizer.eos_token_id,
+                      eos_token_id=tokenizer.eos_token_id,
+                  )
+              seconds = time.perf_counter() - t0
+              generated = output[0, inputs["input_ids"].shape[-1]:]
+              text = tokenizer.decode(generated, skip_special_tokens=True).strip()
+              match = choice_re.fullmatch(text)
+              parsed = int(match.group(1)) - 1 if match else None
+              return {"raw": text, "parsed": parsed, "seconds": seconds}
+
+          feedback = (
+              "That candidate violates the repository constraint. "
+              "Choose another candidate number."
+          )
+
+          records = []
+          frozen_second = Counter()
+          for example, recommendation in zip(test_examples, recommendations):
+              first = generate_choice(frozen_prompt(example, recommendation, None))
+              if first["parsed"] != recommendation:
+                  raise RuntimeError(
+                      f"E027 first-turn reproduction failed for {HELDOUT} "
+                      f"{example.source}: parsed={first['parsed']} rec={recommendation}"
+                  )
+              first_correct = first["parsed"] == example.answer_index
+              first["correct"] = first_correct
+
+              if first_correct:
+                  frozen = {"success": True, "attempts": 1, "second": None}
+                  memory = {"success": True, "attempts": 1, "second": None}
+              else:
+                  frozen_second_attempt = generate_choice(
+                      frozen_prompt(example, recommendation, feedback)
+                  )
+                  fp = frozen_second_attempt["parsed"]
+                  frozen_second_attempt["correct"] = fp == example.answer_index
+                  if fp is None:
+                      frozen_second["invalid"] += 1
+                  elif fp == example.answer_index:
+                      frozen_second["correct"] += 1
+                  elif fp == recommendation:
+                      frozen_second["repeat"] += 1
+                  else:
+                      frozen_second["other_wrong"] += 1
+
+                  memory_second_attempt = generate_choice(
+                      memory_prompt(
+                          example,
+                          recommendation,
+                          first["parsed"],
+                          feedback,
+                      )
+                  )
+                  mp = memory_second_attempt["parsed"]
+                  memory_second_attempt["correct"] = mp == example.answer_index
+                  memory_second_attempt["repeated_rejected"] = mp == first["parsed"]
+
+                  frozen = {
+                      "success": frozen_second_attempt["correct"],
+                      "attempts": 2,
+                      "second": frozen_second_attempt,
+                  }
+                  memory = {
+                      "success": memory_second_attempt["correct"],
+                      "attempts": 2,
+                      "second": memory_second_attempt,
+                  }
+
+              records.append({
+                  "repo": HELDOUT,
+                  "task": task_kind(example),
+                  "source": example.source,
+                  "answer_index": example.answer_index,
+                  "recommendation_index": recommendation,
+                  "recommendation_correct": recommendation == example.answer_index,
+                  "first": first,
+                  "frozen": frozen,
+                  "memory": memory,
+              })
+
+          frozen_success = sum(r["frozen"]["success"] for r in records)
+          if frozen_success != EXPECTED[HELDOUT]["frozen_success"]:
+              raise RuntimeError(
+                  f"frozen success drift for {HELDOUT}: {frozen_success} "
+                  f"!= {EXPECTED[HELDOUT]['frozen_success']}"
+              )
+          if dict(frozen_second) != EXPECTED[HELDOUT]["frozen_second"]:
+              raise RuntimeError(
+                  f"frozen correction drift for {HELDOUT}: "
+                  f"{dict(frozen_second)!r} != {EXPECTED[HELDOUT]['frozen_second']!r}"
+              )
+
+          wrong = [r for r in records if not r["recommendation_correct"]]
+          both = sum(r["frozen"]["success"] and r["memory"]["success"] for r in wrong)
+          memory_only = sum(
+              r["memory"]["success"] and not r["frozen"]["success"] for r in wrong
+          )
+          frozen_only = sum(
+              r["frozen"]["success"] and not r["memory"]["success"] for r in wrong
+          )
+          neither = len(wrong) - both - memory_only - frozen_only
+
+          memory_second = Counter()
+          for r in wrong:
+              second = r["memory"]["second"]
+              parsed = second["parsed"]
+              if parsed is None:
+                  memory_second["invalid"] += 1
+              elif parsed == r["answer_index"]:
+                  memory_second["correct"] += 1
+              elif parsed == r["first"]["parsed"]:
+                  memory_second["repeat"] += 1
+              else:
+                  memory_second["other_wrong"] += 1
+
+          summary = {
+              "heldout_repo": HELDOUT,
+              "model": MODEL_ID,
+              "revision": MODEL_REVISION,
+              "train_examples": len(train_examples),
+              "test_examples": len(test_examples),
+              "test_by_task": dict(Counter(task_kind(e) for e in test_examples)),
+              "recommendation_correct": rec_correct,
+              "wrong_recommendations": len(wrong),
+              "first_followed_recommendation": sum(
+                  r["first"]["parsed"] == r["recommendation_index"] for r in records
+              ),
+              "frozen_successes": frozen_success,
+              "memory_successes": sum(r["memory"]["success"] for r in records),
+              "wrong_recommendation_successes": {
+                  "frozen": sum(r["frozen"]["success"] for r in wrong),
+                  "memory": sum(r["memory"]["success"] for r in wrong),
+              },
+              "paired_wrong_recommendations": {
+                  "both": both,
+                  "memory_only": memory_only,
+                  "frozen_only": frozen_only,
+                  "neither": neither,
+              },
+              "frozen_second": dict(frozen_second),
+              "memory_second": dict(memory_second),
+              "extraction": extraction,
+          }
+
+          path = f"/tmp/e029-{HELDOUT}.json"
+          with open(path, "w", encoding="utf-8") as handle:
+              json.dump(
+                  {"summary": summary, "records": records},
+                  handle, indent=2, sort_keys=True,
+              )
+          print("E029_FOLD_JSON=" + json.dumps(summary, sort_keys=True))
+          PY
+      - name: Upload fold records
+        uses: actions/upload-artifact@v4
+        with:
+          name: e029-${{ matrix.heldout }}
+          path: /tmp/e029-${{ matrix.heldout }}.json
+
+  aggregate:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e029-*
+          path: /tmp/e029
+          merge-multiple: true
+      - name: Aggregate rejection-memory folds
+        run: |
+          python - <<'PY'
+          import glob
+          import json
+          import math
+          import random
+          from collections import Counter, defaultdict
+
+          folds = []
+          records = []
+          for path in sorted(glob.glob("/tmp/e029/e029-*.json")):
+              with open(path, encoding="utf-8") as handle:
+                  payload = json.load(handle)
+              folds.append(payload["summary"])
+              records.extend(payload["records"])
+
+          if len(folds) != 4 or len(records) != 400:
+              raise RuntimeError(
+                  f"expected four folds and 400 tasks, got {len(folds)} and {len(records)}"
+              )
+
+          wrong = [r for r in records if not r["recommendation_correct"]]
+          if len(wrong) != 164:
+              raise RuntimeError(f"expected 164 wrong recommendations, got {len(wrong)}")
+          if sum(r["first"]["parsed"] == r["recommendation_index"] for r in records) != 400:
+              raise RuntimeError("first-turn recommendation-following did not reproduce E027")
+          if sum(r["frozen"]["success"] for r in records) != 289:
+              raise RuntimeError("frozen assisted total did not reproduce E027")
+
+          both = sum(r["frozen"]["success"] and r["memory"]["success"] for r in wrong)
+          memory_only = sum(
+              r["memory"]["success"] and not r["frozen"]["success"] for r in wrong
+          )
+          frozen_only = sum(
+              r["frozen"]["success"] and not r["memory"]["success"] for r in wrong
+          )
+          neither = len(wrong) - both - memory_only - frozen_only
+
+          def two_sided_binomial(k, n):
+              if n == 0:
+                  return 1.0
+              low = min(k, n - k)
+              tail = sum(math.comb(n, i) for i in range(low + 1)) / (2 ** n)
+              return min(1.0, 2.0 * tail)
+
+          memory_second = Counter()
+          for r in wrong:
+              second = r["memory"]["second"]
+              parsed = second["parsed"]
+              if parsed is None:
+                  memory_second["invalid"] += 1
+              elif parsed == r["answer_index"]:
+                  memory_second["correct"] += 1
+              elif parsed == r["first"]["parsed"]:
+                  memory_second["repeat"] += 1
+              else:
+                  memory_second["other_wrong"] += 1
+
+          groups = defaultdict(lambda: defaultdict(list))
+          for r in records:
+              groups[r["repo"]][r["source"]].append(r)
+
+          rng = random.Random(29029)
+          boot = []
+          for _ in range(5000):
+              sample = []
+              for repo in sorted(groups):
+                  sources = sorted(groups[repo])
+                  for _ in range(len(sources)):
+                      source = rng.choice(sources)
+                      sample.extend(groups[repo][source])
+              delta = (
+                  sum(r["memory"]["success"] for r in sample)
+                  - sum(r["frozen"]["success"] for r in sample)
+              ) / len(sample)
+              boot.append(delta)
+
+          def percentile(values, q):
+              xs = sorted(values)
+              pos = (len(xs) - 1) * q
+              lo = int(math.floor(pos))
+              hi = int(math.ceil(pos))
+              if lo == hi:
+                  return xs[lo]
+              w = pos - lo
+              return xs[lo] * (1 - w) + xs[hi] * w
+
+          frozen_wrong = sum(r["frozen"]["success"] for r in wrong)
+          memory_wrong = sum(r["memory"]["success"] for r in wrong)
+          report = {
+              "tasks": len(records),
+              "wrong_recommendations": len(wrong),
+              "recommendation_correct": sum(r["recommendation_correct"] for r in records),
+              "first_followed_recommendation": 400,
+              "frozen_successes": sum(r["frozen"]["success"] for r in records),
+              "memory_successes": sum(r["memory"]["success"] for r in records),
+              "wrong_recommendation_successes": {
+                  "frozen": frozen_wrong,
+                  "memory": memory_wrong,
+                  "delta_points": 100 * (memory_wrong - frozen_wrong) / len(wrong),
+              },
+              "paired_wrong_recommendations": {
+                  "both": both,
+                  "memory_only": memory_only,
+                  "frozen_only": frozen_only,
+                  "neither": neither,
+                  "mcnemar_exact_two_sided_p": two_sided_binomial(
+                      memory_only, memory_only + frozen_only
+                  ),
+              },
+              "memory_second": dict(memory_second),
+              "overall_success_delta": (
+                  sum(r["memory"]["success"] for r in records)
+                  - sum(r["frozen"]["success"] for r in records)
+              ) / len(records),
+              "cluster_bootstrap_95ci_overall_success_delta": [
+                  percentile(boot, 0.025),
+                  percentile(boot, 0.975),
+              ],
+              "folds": folds,
+          }
+
+          with open("/tmp/e029-aggregate.json", "w", encoding="utf-8") as handle:
+              json.dump(
+                  {"summary": report, "records": records},
+                  handle, indent=2, sort_keys=True,
+              )
+          print("E029_AGGREGATE_JSON=" + json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e029-aggregate
+          path: /tmp/e029-aggregate.json
