@@ -21,7 +21,7 @@ E006 removes the two strongest structural shortcuts before the next model benchm
 For every retained example, all candidates:
 
 1. come from the **same source file** as the caller;
-2. have the **same positional function arity** as the true target;
+2. have the **same structural call shape** as the true target: positional count, keyword-only count, `*args`, and `**kwargs`;
 3. exclude the caller itself;
 4. omit file paths from the scored candidate text;
 5. use a fixed candidate count.
@@ -35,7 +35,7 @@ with easier negatives.
 
 A path-matching rule has no information because all candidates share the file.
 
-An arity rule has no information because all candidates share the target's arity.
+A parameter-shape rule has no information because all candidates share positional count, keyword-only count, and variadic flags.
 
 Exact callee-name matching is unavailable because the target is masked.
 
