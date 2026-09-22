@@ -6,6 +6,7 @@ not ask a language model to label training data.
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 import json
 import random
@@ -173,7 +174,7 @@ def _direct_local_target_names(source: str, symbols: tuple[PythonSymbol, ...]) -
     return result
 
 
-def _candidate_set(
+def _candidate_symbols(
     *,
     target: PythonSymbol,
     local_symbols: tuple[PythonSymbol, ...],
@@ -181,8 +182,8 @@ def _candidate_set(
     max_candidates: int,
     seed: int,
     key: str,
-) -> tuple[tuple[str, ...], int]:
-    """Build a deterministic repository-wide candidate set containing the target."""
+) -> tuple[tuple[PythonSymbol, ...], int]:
+    """Choose deterministic repository-wide candidate symbols containing the target."""
     if max_candidates < 2:
         raise ValueError("max_candidates must be at least 2")
 
@@ -205,8 +206,29 @@ def _candidate_set(
         chosen.extend(global_negatives[: max_candidates - len(chosen)])
 
     rng.shuffle(chosen)
-    candidates = tuple(symbol.candidate for symbol in chosen)
-    return candidates, candidates.index(target.candidate)
+    frozen = tuple(chosen)
+    return frozen, frozen.index(target)
+
+
+def _candidate_set(
+    *,
+    target: PythonSymbol,
+    local_symbols: tuple[PythonSymbol, ...],
+    all_symbols: tuple[PythonSymbol, ...],
+    max_candidates: int,
+    seed: int,
+    key: str,
+) -> tuple[tuple[str, ...], int]:
+    """Build a deterministic repository-wide candidate set containing the target."""
+    symbols, answer_index = _candidate_symbols(
+        target=target,
+        local_symbols=local_symbols,
+        all_symbols=all_symbols,
+        max_candidates=max_candidates,
+        seed=seed,
+        key=key,
+    )
+    return tuple(symbol.candidate for symbol in symbols), answer_index
 
 
 def repository_call_examples(
@@ -256,6 +278,135 @@ def repository_call_examples(
                     candidates=candidates,
                     answer_index=answer_index,
                     task="python.direct_call",
+                    source=source_name,
+                )
+            )
+
+    return examples
+
+
+class _TargetNameMasker(ast.NodeTransformer):
+    """Replace references to one symbol with a neutral call-target marker."""
+
+    def __init__(self, target_name: str) -> None:
+        self.target_name = target_name
+
+    def visit_Name(self, node: ast.Name):
+        if node.id == self.target_name:
+            return ast.copy_location(
+                ast.Name(id="__CALL_TARGET__", ctx=node.ctx),
+                node,
+            )
+        return node
+
+
+def _masked_function_body(
+    source: str,
+    *,
+    caller_name: str,
+    target_name: str,
+) -> str | None:
+    """Return a normalized caller definition with target-name references removed."""
+    tree = ast.parse(source)
+    caller = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == caller_name
+        ),
+        None,
+    )
+    if caller is None:
+        return None
+
+    masked = copy.deepcopy(caller)
+    masked = _TargetNameMasker(target_name).visit(masked)
+    ast.fix_missing_locations(masked)
+
+    # The target should no longer survive as an executable Name node.
+    if any(
+        isinstance(node, ast.Name) and node.id == target_name
+        for node in ast.walk(masked)
+    ):
+        return None
+    return ast.unparse(masked)
+
+
+def _rich_candidate(symbol: PythonSymbol, *, body_chars: int) -> str:
+    """Render a candidate with enough implementation context for semantic matching."""
+    body = symbol.body
+    if body_chars > 0:
+        body = body[:body_chars]
+    return f"{symbol.candidate}\n{body}"
+
+
+def repository_masked_call_examples(
+    root: str | Path,
+    *,
+    max_candidates: int = 16,
+    candidate_body_chars: int = 768,
+    seed: int = 0,
+    strict: bool = False,
+) -> list[DecisionExample]:
+    """Create call-target decisions after removing the target identifier from the caller.
+
+    The ground-truth edge still comes directly from the AST, but the caller no longer
+    contains the callee identifier as an executable Name. Candidate definitions include
+    source, signature, and a bounded body excerpt so string equality alone cannot solve
+    the task.
+    """
+    root_path = Path(root).resolve()
+    all_symbols, by_file = collect_python_symbols(root_path, strict=strict)
+    if len(all_symbols) < 2:
+        return []
+
+    examples: list[DecisionExample] = []
+    for source_name, local_symbols in sorted(by_file.items()):
+        path = root_path / source_name
+        try:
+            source_text = path.read_text(encoding="utf-8")
+            targets = _direct_local_target_names(source_text, local_symbols)
+        except (OSError, UnicodeError, SyntaxError):
+            if strict:
+                raise
+            continue
+
+        by_name = {symbol.name: symbol for symbol in local_symbols}
+        for caller_name, target_name in sorted(targets.items()):
+            caller = by_name[caller_name]
+            target = by_name[target_name]
+            masked_body = _masked_function_body(
+                source_text,
+                caller_name=caller_name,
+                target_name=target_name,
+            )
+            if masked_body is None:
+                continue
+
+            symbols, answer_index = _candidate_symbols(
+                target=target,
+                local_symbols=local_symbols,
+                all_symbols=all_symbols,
+                max_candidates=min(max_candidates, len(all_symbols)),
+                seed=seed,
+                key=f"masked:{source_name}:{caller_name}",
+            )
+            candidates = tuple(
+                _rich_candidate(symbol, body_chars=candidate_body_chars)
+                for symbol in symbols
+            )
+            context = f"file: {source_name}\n\n{masked_body}"
+            examples.append(
+                DecisionExample(
+                    context=context,
+                    question=(
+                        "Which candidate definition should replace "
+                        "__CALL_TARGET__ in this caller?"
+                    ),
+                    candidates=candidates,
+                    answer_index=answer_index,
+                    task="python.masked_direct_call",
                     source=source_name,
                 )
             )
