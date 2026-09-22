@@ -11,6 +11,8 @@ class DecisionExample:
     question: str
     candidates: tuple[str, ...]
     answer_index: int
+    task: str = "unspecified"
+    source: str | None = None
 
 
 def _top_level_functions(source: str):
