@@ -10,9 +10,9 @@ class FakeStaticModel:
         self.normalize = False
         self.calls = []
 
-    def encode(self, texts):
+    def encode(self, texts, *, max_length=None):
         texts = list(texts)
-        self.calls.append(tuple(texts))
+        self.calls.append((tuple(texts), max_length))
         return [
             [float(len(text)), 1.0, 2.0, 3.0, 4.0][: self.dim]
             for text in texts
@@ -28,8 +28,11 @@ def test_potion_role_encoding_is_symmetric():
     candidate = encoder.encode_role(["candidate"], role="candidate")
 
     assert context.shape == question.shape == candidate.shape == (1, 5)
-    assert fake.calls == [("caller",), ("question",), ("candidate",)]
-    assert fake.max_length == 1024
+    assert fake.calls == [
+        (("caller",), 1024),
+        (("question",), 1024),
+        (("candidate",), 1024),
+    ]
 
 
 def test_potion_adapter_has_no_trainable_parameters():
