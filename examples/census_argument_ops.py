@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
-"""E034 census: perturbation coverage and the model-free predicate baseline.
+"""E034 census: perturbation coverage, leakage control, and the model-free
+predicate baseline.
 
 For each hard task family, reports how many decisions admit a restorable
-argument perturbation, which perturbation types apply, and how far E024
-bindability alone narrows the single-operation plan space:
+argument perturbation, which perturbation types apply, whether the visible
+corruption is invariant to relabelling the answer, and how far E024
+bindability alone narrows the plan space (candidate x single operation):
 
-- plans that bind (candidate x operation);
+- mean size of the plan space and of its binding subset;
+- mean number of candidates left with at least one binding plan;
 - decisions where the restoring plan is the only binding plan (solved by
   predicate alone);
-- decisions where bindability leaves exactly one binding plan per candidate,
-  so the ranker's choice decides the outcome.
+- decisions where every candidate has exactly one binding plan (pure
+  selection: the ranker's choice alone decides the outcome);
+- decisions where no surviving candidate has more than one binding plan
+  (weaker; candidates with zero plans are excluded, so this is not pure
+  selection).
 
 No model download is required. The default root is this repository.
 
@@ -23,7 +29,13 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from cdm.argument_ops import argument_repair_examples, perturbations_for, predicate_search
+from cdm.argument_ops import (
+    argument_repair_example,
+    argument_repair_examples,
+    corruption_is_label_invariant,
+    perturbations_for,
+    predicate_census,
+)
 from cdm.crossfile import repository_hard_masked_cross_file_call_examples
 from cdm.methods import repository_hard_masked_method_call_examples
 from cdm.repository import repository_hard_masked_call_examples
@@ -34,28 +46,30 @@ def report(label: str, examples) -> None:
     items = argument_repair_examples(examples, seed=0)
     chosen = Counter(item.perturbation for item in items)
     print(f"=== {label} ===")
-    print(f"decisions:                    {len(examples)}")
-    print(f"perturbable decisions:        {len(items)}")
+    print(f"decisions:                        {len(examples)}")
+    print(f"perturbable decisions:            {len(items)}")
     if kinds:
-        print("applicable perturbations:     " + ", ".join(f"{k}: {v}" for k, v in sorted(kinds.items())))
-        print("chosen (seed 0):              " + ", ".join(f"{k}: {v}" for k, v in sorted(chosen.items())))
+        print("applicable perturbations:         " + ", ".join(f"{k}: {v}" for k, v in sorted(kinds.items())))
+        print("chosen (seed 0):                  " + ", ".join(f"{k}: {v}" for k, v in sorted(chosen.items())))
     if items:
-        binding_counts = []
-        unique = 0
-        one_per_candidate = 0
-        restoring_present = 0
-        for item in items:
-            plans = predicate_search(item)
-            binding_counts.append(len(plans))
-            restoring_present += item.restoring_plan in plans
-            unique += len(plans) == 1 and plans[0] == item.restoring_plan
-            by_candidate = Counter(p.candidate_index for p in plans)
-            one_per_candidate += bool(by_candidate) and max(by_candidate.values()) == 1
+        invariant = sum(corruption_is_label_invariant(e) for e in examples if argument_repair_example(e, seed=0))
+        census = [predicate_census(item) for item in items]
         n = len(items)
-        print(f"mean binding single-op plans: {sum(binding_counts) / n:.2f}")
-        print(f"restoring plan binds:         {restoring_present}/{n}")
-        print(f"solved by predicate alone:    {unique}/{n} ({100.0 * unique / n:.1f}%)")
-        print(f"one binding plan per cand.:   {one_per_candidate}/{n} ({100.0 * one_per_candidate / n:.1f}%)")
+        space = sum(c.plan_space_size for c in census) / n
+        binding = sum(c.binding_plans for c in census) / n
+        survivors = sum(c.surviving_candidates for c in census) / n
+        restoring = sum(c.restoring_plan_binds for c in census)
+        solved = sum(c.solved_by_predicate for c in census)
+        pure = sum(c.pure_selection for c in census)
+        weak = sum(c.at_most_one_per_survivor for c in census)
+        print(f"label-invariant corruption:       {invariant}/{n}")
+        print(f"mean plan space (cand x op):      {space:.2f}")
+        print(f"mean binding plans:               {binding:.2f}")
+        print(f"mean surviving candidates:        {survivors:.2f} of {len(items[0].example.candidates)}")
+        print(f"restoring plan binds:             {restoring}/{n}")
+        print(f"solved by predicate alone:        {solved}/{n} ({100.0 * solved / n:.1f}%)")
+        print(f"pure selection (1 plan / cand.):  {pure}/{n} ({100.0 * pure / n:.1f}%)")
+        print(f"<=1 plan per surviving cand.:     {weak}/{n} ({100.0 * weak / n:.1f}%)")
     print()
 
 

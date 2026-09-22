@@ -277,10 +277,14 @@ missing calls or arguments.
 See [E034_ARGUMENT_OPERATIONS.md](E034_ARGUMENT_OPERATIONS.md).
 
 Successor to the stopped E033 free-form call surface. The generator emits a
-candidate index plus argument operations from a closed vocabulary (swap, drop,
-rename, name, unname); the masked call is perturbed deterministically with the
-original as truth; a four-stage verifier with E024 bindability judges the plan.
-A model-free predicate-search baseline enumerates the operation space.
+candidate index plus exactly one argument operation (keep, swap, drop, rename,
+name, unname) whose identifier operands must come from a closed vocabulary:
+call-site keywords plus parameter names visible in any candidate. The masked
+call is perturbed deterministically and label-free, with the original as truth;
+a four-stage verifier (parse and vocabulary, applicability, E024 bindability,
+exact match) judges the plan. A model-free predicate-search baseline enumerates
+the same candidate x operation plan space the parser admits, and a leakage
+control checks that the visible corruption is invariant to relabelling.
 
 Census:
 
