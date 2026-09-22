@@ -29,18 +29,26 @@ Consequences:
 4. retrieval can reduce a repository-scale candidate set before discrimination;
 5. the decision head remains independent of the particular encoder.
 
-## Phase 0 encoder
+## Encoder history and current stack
 
-The first encoder is intentionally a trainable hashed-token mean pool. It is not expected to
-be competitive. It exists to test interfaces, caching, data generation, and invariants without
-network downloads or GPU requirements.
+The original Phase 0 encoder was a trainable hashed-token mean pool used only to
+test interfaces, caching, data generation, and invariants.
 
-If the primitive behaves sensibly, replace it with a code-pretrained encoder and compare:
+Subsequent experiments evaluated real code encoders. The current frozen
+end-to-end protocol uses:
 
-- GraphCodeBERT;
-- UniXcoder;
-- CodeT5/CodeT5+ encoder representations;
-- a newer compact code embedding model if benchmarking justifies it.
+- `nomic-ai/CodeRankEmbed` for context/question/candidate representations;
+- a small `PairwiseMLPScorer(hidden=32)`;
+- independently cached candidate embeddings;
+- `Qwen/Qwen2.5-Coder-0.5B-Instruct` as the compact generator;
+- structured candidate selection rather than whole-function regeneration.
+
+E027 showed the corrective-burden effect survives leave-one-repository-out scorer
+training across the four pinned development repositories.
+
+Encoder/scorer changes are now exploratory cost or transfer questions, not the
+primary validation gate. They should be compared against the frozen end-to-end
+protocol rather than only ranking accuracy.
 
 ## Supervision ladder
 
@@ -64,3 +72,22 @@ It is:
 > corrective turns than the same generator alone?
 
 Everything else is an intermediate metric.
+
+
+## Current validation frontier
+
+The current strongest evidence is E027: across 400 leave-one-repository-out
+examples, success within two attempts was 50.5% baseline vs 72.3% with decision
+assistance.
+
+The next primary gate is development-independent replication on a second pinned
+repository set that has not influenced architecture or hyperparameter choices.
+
+See:
+
+- `docs/E027_LEAVE_ONE_REPOSITORY_OUT_RESULT.md`
+- `docs/OPEN_DIRECTIONS.md`
+
+Do not treat the current result as a claim about arbitrary free-form code repair.
+The demonstrated task is structured candidate selection with deterministic
+machine-labelled supervision and verification.
