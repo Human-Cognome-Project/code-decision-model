@@ -1,0 +1,149 @@
+name: recent-compact-focus
+
+on:
+  push:
+    branches: ["analysis/recent-compact-focus"]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: unixcoder-base-v4-${{ runner.os }}-py312-compact-focus-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project with encoder dependencies
+        run: python -m pip install -e ".[hf]"
+      - name: Clone exact benchmark revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"
+            sha="$2"
+            dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/recent
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/recent/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/recent/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/recent/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/recent/scrapling
+      - name: Compare header focus modes
+        run: |
+          python - <<'PY'
+          import json
+          from collections import defaultdict
+
+          import torch
+          from torch.nn import functional as F
+
+          from cdm import CodeDecisionModel, UniXcoderEncoder
+          from cdm.focus import focus_hard_call_context
+          from cdm.repository import (
+              namespace_repository_examples,
+              repository_hard_masked_call_examples,
+          )
+          from cdm.training import preencode_examples
+
+          REPOS = {
+              "browser-use": "/tmp/recent/browser-use",
+              "crawl4ai": "/tmp/recent/crawl4ai",
+              "markitdown": "/tmp/recent/markitdown",
+              "scrapling": "/tmp/recent/scrapling",
+          }
+
+          full = []
+          for name, root in REPOS.items():
+              examples = repository_hard_masked_call_examples(
+                  root,
+                  candidate_count=4,
+                  candidate_body_chars=512,
+                  seed=0,
+              )
+              full.extend(namespace_repository_examples(examples, name))
+
+          modes = {
+              "full": full,
+              "radius0": [
+                  focus_hard_call_context(e, radius_lines=0)
+                  for e in full
+              ],
+              "compact_radius0": [
+                  focus_hard_call_context(
+                      e,
+                      radius_lines=0,
+                      compact_header=True,
+                  )
+                  for e in full
+              ],
+          }
+
+          def score(examples, preds):
+              correct = 0
+              buckets = defaultdict(lambda: [0, 0])
+              for e, pred in zip(examples, preds):
+                  ok = int(pred == e.answer_index)
+                  correct += ok
+                  repo = e.source.split("::", 1)[0]
+                  buckets[repo][0] += ok
+                  buckets[repo][1] += 1
+              return {
+                  "accuracy": correct / len(examples),
+                  "correct": correct,
+                  "count": len(examples),
+                  "by_repo": {
+                      repo: {
+                          "accuracy": c / n,
+                          "correct": c,
+                          "count": n,
+                      }
+                      for repo, (c, n) in sorted(buckets.items())
+                  },
+              }
+
+          encoder = UniXcoderEncoder(frozen=True, max_length=512)
+          shell = CodeDecisionModel(encoder=encoder, dim=encoder.dim, hidden=32)
+
+          report = {
+              "examples": len(full),
+              "random_expected": 0.25,
+              "modes": {},
+          }
+
+          for mode, examples in modes.items():
+              encoded = preencode_examples(shell, examples, batch_size=8)
+              preds = []
+              for item in encoded:
+                  q = F.normalize(item.decision_context.context.float(), dim=0)
+                  candidates = F.normalize(item.candidate_embeddings.float(), dim=1)
+                  preds.append(int(torch.mv(candidates, q).argmax()))
+              token_lengths = [
+                  len(encoder.tokenizer.tokenize(e.context))
+                  for e in examples
+              ]
+              marker_positions = [
+                  len(encoder.tokenizer.tokenize(
+                      e.context.split("__CALL_TARGET__", 1)[0]
+                  ))
+                  for e in examples
+              ]
+              report["modes"][mode] = {
+                  "score": score(examples, preds),
+                  "tokens_mean": sum(token_lengths) / len(token_lengths),
+                  "tokens_max": max(token_lengths),
+                  "marker_truncated": sum(p >= 508 for p in marker_positions),
+              }
+
+          print("COMPACT_FOCUS_JSON=" + json.dumps(report, sort_keys=True))
+          PY
