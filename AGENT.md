@@ -19,6 +19,21 @@ This repository is an experiment in a small, local, discriminative decision mode
 5. **Practical success criterion remains primary**  
    The ultimate test is whether a small local generator + this decision model needs materially fewer corrective turns than the generator alone. Intermediate ranking metrics are useful only insofar as they serve that goal.
 
+## Current experimental state
+
+The current strongest result is E027.
+
+- E022: full-function generation with the pinned Qwen 0.5B model did not cross the deterministic validity floor.
+- E023: structured edit intent produced the first positive 12-task corrective-burden pilot.
+- E025: the effect was confirmed on the full 63-example same-repository held-out split.
+- E027: leave-one-repository-out scorer training across all 400 examples produced 50.5% baseline vs 72.3% assisted success within two attempts. The paired micro gain was +21.75 percentage points; the repository-stratified source-file bootstrap 95% interval was +14.37 to +27.67 points, and every repository fold was positive.
+
+The next primary gate is **development-independent replication on a second pinned repository set that has not influenced architecture or hyperparameter choices**.
+
+Do not retune the existing four repositories simply to improve E027. See
+`docs/E027_LEAVE_ONE_REPOSITORY_OUT_RESULT.md` and
+`docs/OPEN_DIRECTIONS.md`.
+
 ## Preferred contribution style
 
 - Advance one clear experiment or close a measurement gap.
@@ -29,11 +44,18 @@ This repository is an experiment in a small, local, discriminative decision mode
 
 ## High-value directions
 
-- End-to-end corrective-turn evaluation harness.
-- Clean interface for attaching hard deterministic constraints / validators that can veto or re-rank after neural scoring.
-- Cross-file decisions under the same integrity controls used for same-file masked recovery.
-- Further reduction of scorer capacity while preserving signal.
-- Specialized, narrow need-expression models that emit precise intermediate forms for the decision layer.
+The authoritative current list is [docs/OPEN_DIRECTIONS.md](docs/OPEN_DIRECTIONS.md).
+
+Highest priority:
+
+- development-independent replication on a second pinned repository set;
+- harder machine-verifiable decision types, especially cross-file/LSP/compiler-backed tasks;
+- structured patch intents that remain deterministic to apply and verify;
+- repository-scale retrieval followed by decision reranking;
+- live-loop use of hard deterministic constraints;
+- cost reduction only when the frozen corrective-burden effect is preserved.
+
+Exploratory work should state what result would falsify or stop the direction.
 
 ## Low-value / avoid
 
