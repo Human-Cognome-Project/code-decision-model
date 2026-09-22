@@ -1,0 +1,189 @@
+name: recent-callsite-focus
+
+on:
+  push:
+    branches: ["analysis/recent-callsite-focus"]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: unixcoder-base-v4-${{ runner.os }}-py312-focus-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project with encoder dependencies
+        run: python -m pip install -e ".[hf]"
+      - name: Clone exact benchmark revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"
+            sha="$2"
+            dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/recent
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/recent/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/recent/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/recent/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/recent/scrapling
+      - name: Sweep call-site context radius
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from collections import defaultdict
+
+          import torch
+          from torch.nn import functional as F
+
+          from cdm import CodeDecisionModel, UniXcoderEncoder
+          from cdm.focus import focus_hard_call_context
+          from cdm.repository import (
+              namespace_repository_examples,
+              repository_hard_masked_call_examples,
+          )
+          from cdm.training import preencode_examples
+
+          REPOS = {
+              "browser-use": "/tmp/recent/browser-use",
+              "crawl4ai": "/tmp/recent/crawl4ai",
+              "markitdown": "/tmp/recent/markitdown",
+              "scrapling": "/tmp/recent/scrapling",
+          }
+          K = 4
+          TOKEN = re.compile(r"[A-Za-z_][A-Za-z_0-9]*|\d+")
+
+          def repo_of(example):
+              return example.source.split("::", 1)[0]
+
+          def token_set(text):
+              stop = {
+                  "def", "async", "return", "if", "else", "for", "in", "and", "or",
+                  "not", "the", "a", "an", "to", "of", "is", "this", "call_target",
+                  "none", "true", "false", "omitted", "before", "after", "site",
+              }
+              return {
+                  t.lower() for t in TOKEN.findall(text)
+                  if len(t) > 1 and t.lower() not in stop
+              }
+
+          def lexical_predictions(examples):
+              preds = []
+              for example in examples:
+                  ctx = token_set(example.context)
+                  scores = []
+                  for candidate in example.candidates:
+                      cand = token_set(candidate)
+                      union = ctx | cand
+                      scores.append(len(ctx & cand) / max(1, len(union)))
+                  preds.append(max(range(len(scores)), key=scores.__getitem__))
+              return preds
+
+          @torch.no_grad()
+          def cosine_predictions(encoded):
+              result = []
+              for item in encoded:
+                  context = F.normalize(item.decision_context.context.float(), dim=0)
+                  candidates = F.normalize(item.candidate_embeddings.float(), dim=1)
+                  result.append(int(torch.mv(candidates, context).argmax()))
+              return result
+
+          def score(examples, preds):
+              buckets = defaultdict(lambda: [0, 0])
+              correct = 0
+              for example, pred in zip(examples, preds):
+                  ok = int(pred == example.answer_index)
+                  correct += ok
+                  buckets[repo_of(example)][0] += ok
+                  buckets[repo_of(example)][1] += 1
+              return {
+                  "accuracy": correct / len(examples),
+                  "correct": correct,
+                  "count": len(examples),
+                  "by_repo": {
+                      k: {
+                          "accuracy": v[0] / v[1],
+                          "correct": v[0],
+                          "count": v[1],
+                      }
+                      for k, v in sorted(buckets.items())
+                  },
+              }
+
+          full = []
+          for name, root in REPOS.items():
+              examples = repository_hard_masked_call_examples(
+                  root,
+                  candidate_count=K,
+                  candidate_body_chars=512,
+                  seed=0,
+              )
+              full.extend(namespace_repository_examples(examples, name))
+
+          modes = {"full": list(full)}
+          for radius in (0, 2, 4, 8, 16):
+              modes[f"radius_{radius}"] = [
+                  focus_hard_call_context(e, radius_lines=radius)
+                  for e in full
+              ]
+
+          encoder = UniXcoderEncoder(frozen=True, max_length=512)
+          shell = CodeDecisionModel(encoder=encoder, dim=encoder.dim, hidden=32)
+
+          mode_names = list(modes)
+          combined = []
+          bounds = {}
+          start = 0
+          for mode in mode_names:
+              values = modes[mode]
+              combined.extend(values)
+              bounds[mode] = (start, start + len(values))
+              start += len(values)
+
+          encoded = preencode_examples(shell, combined, batch_size=8)
+
+          report = {
+              "candidate_count": K,
+              "random_expected": 1.0 / K,
+              "examples": len(full),
+              "modes": {},
+          }
+          for mode in mode_names:
+              begin, end = bounds[mode]
+              examples = modes[mode]
+              enc = encoded[begin:end]
+              lex = lexical_predictions(examples)
+              cosine = cosine_predictions(enc)
+              token_lengths = [
+                  len(encoder.tokenizer.tokenize(e.context))
+                  for e in examples
+              ]
+              marker_positions = [
+                  len(encoder.tokenizer.tokenize(
+                      e.context.split("__CALL_TARGET__", 1)[0]
+                  ))
+                  for e in examples
+              ]
+              report["modes"][mode] = {
+                  "lexical": score(examples, lex),
+                  "unixcoder_cosine": score(examples, cosine),
+                  "context_tokens_mean": sum(token_lengths) / len(token_lengths),
+                  "context_tokens_max": max(token_lengths),
+                  "marker_truncated": sum(p >= 508 for p in marker_positions),
+              }
+
+          print("CALLSITE_FOCUS_JSON=" + json.dumps(report, sort_keys=True))
+          PY
