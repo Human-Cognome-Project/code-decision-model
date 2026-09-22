@@ -114,7 +114,7 @@ be reported against this baseline, not against chance.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | same-file functions | 34/98 | 34/34 | 37.5 | 4.9 | 3.88/4 | 0/34 | 29/34 (85%) | 31/34 (91%) |
 | same-class methods | 4/4 | 4/4 | 12.0 | 12.0 | 4.00/4 | 0/4 | 0/4 | 0/4 |
-| cross-file functions | 81/115 | 81/81 | 99.8 | 8.9 | 3.33/4 | 3/81 (4%) | 28/81 (35%) | 32/81 (40%) |
+| cross-file functions | 81/115 | 81/81 | 100.0 | 8.8 | 3.33/4 | 3/81 (4%) | 29/81 (36%) | 33/81 (41%) |
 
 Reading: bindability prunes the plan space by roughly an order of magnitude
 but almost never resolves a decision on its own. On the same-file family it
@@ -126,7 +126,10 @@ over-credited as pure selection. The four method-call decisions all bind every
 plan because E024 accepts either the bound or the static reading for receiver
 calls; they are too few to matter.
 
-`python examples/census_argument_ops.py` reproduces the table.
+`python examples/census_argument_ops.py` reproduces the table. The corpus is
+this repository's own source, including the census script, so the numbers
+shift slightly whenever the code changes; treat them as a shape, not a
+benchmark.
 
 ## What this tests, per the contribution rule
 
