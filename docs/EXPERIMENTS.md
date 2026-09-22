@@ -158,3 +158,10 @@ Adds an analysis-only decomposition of remaining assisted failures into machine-
 See [E028_FAILURE_CONDITIONED_RESULT.md](E028_FAILURE_CONDITIONED_RESULT.md).
 
 The preserved E027 task records show that the assisted generator followed the decision recommendation on 400/400 first attempts. Correct recommendations solved 236/236 tasks immediately; all 111 assisted terminal failures occurred after wrong recommendations. On the 164 wrong-recommendation tasks, success within two attempts was 80/164 baseline vs 53/164 assisted, with 20 second turns repeating the already-rejected recommendation. This motivates E029: deterministic rejection memory that removes a verifier-rejected candidate from the next-turn choice set.
+
+
+## E029 — Deterministic rejection memory
+
+See [E029_REJECTION_MEMORY.md](E029_REJECTION_MEMORY.md).
+
+Motivated by E028: after the deterministic verifier rejects a candidate, remove that candidate from the next-turn choice set and remove any recommendation pointing to it. The first-turn prompt remains exactly frozen. The experiment asks whether this hard correction-memory rule improves two-attempt success on wrong-recommendation tasks.
