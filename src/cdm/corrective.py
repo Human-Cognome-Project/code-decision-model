@@ -1,4 +1,4 @@
-"""Paired corrective-turn statistics for E021/E023-style experiments.
+"""Paired corrective-turn statistics for E021/E023-style experiments (E026).
 
 Both the full-function repair harness (E021) and the structured-edit harness
 (E023) produce paired baseline/assisted outcomes per task. This module turns a
@@ -300,12 +300,15 @@ def cluster_bootstrap_paired(
     bootstrap_samples: int = 5000,
     confidence: float = 0.95,
     seed: int = 0,
+    strata: Callable[[DecisionExample], str] | None = None,
 ) -> PairedInterval:
     """Percentile bootstrap over source files for one paired statistic.
 
     Tasks from one source file share a caller pool and style, so files are the
     resampling unit, as in E012. The paired structure is preserved because each
-    task carries both arms.
+    task carries both arms. When ``strata`` is provided, source files are sampled
+    independently within each stratum so its number of source-file draws is held
+    fixed. E025 used ``strata=by_namespace`` to preserve repository composition.
 
     ``mean_correction_turn_delta`` is conditional on paired successes; resamples
     with none are skipped and ``samples`` reports how many were kept.
@@ -322,17 +325,21 @@ def cluster_bootstrap_paired(
     if point is None:
         raise ValueError("statistic is undefined: no task was resolved by both arms")
 
-    groups: dict[str, list[PairedOutcome]] = {}
+    groups: dict[str, dict[str, list[PairedOutcome]]] = {}
     for example, outcome in zip(examples, outcomes):
-        groups.setdefault(example.source, []).append(outcome)
-    keys = sorted(groups)
+        stratum = strata(example) if strata is not None else "__all__"
+        groups.setdefault(stratum, {}).setdefault(example.source, []).append(outcome)
 
     rng = random.Random(seed)
     values: list[float] = []
     for _ in range(bootstrap_samples):
         resampled: list[PairedOutcome] = []
-        for _ in range(len(keys)):
-            resampled.extend(groups[keys[rng.randrange(len(keys))]])
+        for stratum in sorted(groups):
+            source_groups = groups[stratum]
+            keys = sorted(source_groups)
+            for _ in range(len(keys)):
+                key = keys[rng.randrange(len(keys))]
+                resampled.extend(source_groups[key])
         value = _statistic(summarize_paired(resampled), statistic)
         if value is not None:
             values.append(value)
