@@ -22,6 +22,7 @@ from .repair import (
     run_repair_loop,
     verify_repair,
 )
+from .binding import CallShape, CallSiteBindable, Parameters
 from .constraints import (
     AllAllowed,
     ConstrainedDecision,
@@ -51,6 +52,9 @@ __all__ = [
     "run_paired_repair",
     "run_repair_loop",
     "verify_repair",
+    "CallShape",
+    "CallSiteBindable",
+    "Parameters",
     "AllAllowed",
     "ConstrainedDecision",
     "Constraint",

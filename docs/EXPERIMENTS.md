@@ -63,7 +63,6 @@ See [E022_OPEN_GENERATOR_REPAIR.md](E022_OPEN_GENERATOR_REPAIR.md).
 First live open-generator experiment on the E021 harness. Reserved for a pinned
 real model; the mock path lives under E021.
 
-
 ### E022 live result
 
 See [E022_LIVE_QWEN_RESULT.md](E022_LIVE_QWEN_RESULT.md).
@@ -71,3 +70,17 @@ See [E022_LIVE_QWEN_RESULT.md](E022_LIVE_QWEN_RESULT.md).
 The first pinned Qwen 0.5B pilot produced zero verified repairs in either arm.
 The result is inconclusive for correction-turn reduction because the generator
 did not cross the deterministic validity floor.
+
+## E024 — Call-site bindability predicate
+
+See [E024_CALL_SITE_PREDICATE.md](E024_CALL_SITE_PREDICATE.md).
+
+First hard constraint derived from AST facts rather than substrings. Measures
+what deterministic argument binding removes from masked-call decisions and
+asserts it never vetoes the machine-labelled target.
+
+Census:
+
+```bash
+python examples/census_call_site_predicate.py
+```
