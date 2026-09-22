@@ -1,0 +1,508 @@
+name: e032-ranked-memory-live
+
+on:
+  push:
+    branches: ["analysis/e032-ranked-memory-live"]
+
+jobs:
+  benchmark:
+    strategy:
+      fail-fast: false
+      matrix:
+        heldout: [browser-use, crawl4ai, markitdown, scrapling]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Restore model cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: e025-qwen05-coderank-${{ runner.os }}-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install model dependencies
+        run: python -m pip install -e ".[hf,coderank]"
+      - name: Clone exact E027 revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"
+            sha="$2"
+            dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/recent
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/recent/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/recent/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/recent/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/recent/scrapling
+      - name: Run E032 correction comparison
+        env:
+          HELDOUT_REPO: ${{ matrix.heldout }}
+        run: |
+          python - <<'PY'
+          import gc
+          import json
+          import os
+          import re
+          import time
+
+          import torch
+          from transformers import AutoModelForCausalLM, AutoTokenizer
+
+          from cdm import CodeDecisionModel, CodeRankEncoder, PairwiseMLPScorer
+          from cdm.binding import CallSiteBindable
+          from cdm.focus import focus_hard_call_context
+          from cdm.methods import repository_hard_masked_method_call_examples
+          from cdm.repository import (
+              namespace_repository_examples,
+              repository_hard_masked_call_examples,
+          )
+          from cdm.training import collate_encoded_examples, preencode_examples
+
+          REPOS = {
+              "browser-use": "/tmp/recent/browser-use",
+              "crawl4ai": "/tmp/recent/crawl4ai",
+              "markitdown": "/tmp/recent/markitdown",
+              "scrapling": "/tmp/recent/scrapling",
+          }
+          EXPECTED = {
+              "browser-use": {"test": 210, "top1": 133, "wrong": 77, "memory_wrong_success": 28},
+              "crawl4ai": {"test": 160, "top1": 83, "wrong": 77, "memory_wrong_success": 23},
+              "markitdown": {"test": 17, "top1": 11, "wrong": 6, "memory_wrong_success": 3},
+              "scrapling": {"test": 13, "top1": 9, "wrong": 4, "memory_wrong_success": 2},
+          }
+          HELDOUT = os.environ["HELDOUT_REPO"]
+          MODEL_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+          MODEL_REVISION = "ea3f2471cf1b1f0db85067f1ef93848e38e88c25"
+          K = 4
+          BODY_CHARS = 512
+
+          def repo_of(example):
+              return example.source.split("::", 1)[0]
+
+          def task_kind(example):
+              return "method" if "same_class" in example.task else "function"
+
+          pooled = []
+          extraction = {}
+          for name, root in REPOS.items():
+              funcs = repository_hard_masked_call_examples(
+                  root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+              )
+              methods = repository_hard_masked_method_call_examples(
+                  root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+              )
+              extraction[name] = {"functions": len(funcs), "methods": len(methods)}
+              pooled.extend(namespace_repository_examples(funcs, name))
+              pooled.extend(namespace_repository_examples(methods, name))
+
+          expected_extraction = {
+              "browser-use": {"functions": 68, "methods": 142},
+              "crawl4ai": {"functions": 65, "methods": 95},
+              "markitdown": {"functions": 11, "methods": 6},
+              "scrapling": {"functions": 2, "methods": 11},
+          }
+          if extraction != expected_extraction:
+              raise RuntimeError(f"extraction drift: {extraction!r}")
+
+          train_examples = [e for e in pooled if repo_of(e) != HELDOUT]
+          test_examples = [e for e in pooled if repo_of(e) == HELDOUT]
+          if len(test_examples) != EXPECTED[HELDOUT]["test"]:
+              raise RuntimeError(
+                  f"test-count drift {HELDOUT}: {len(test_examples)} "
+                  f"!= {EXPECTED[HELDOUT]['test']}"
+              )
+
+          train_focus = [focus_hard_call_context(e, radius_lines=0) for e in train_examples]
+          test_focus = [focus_hard_call_context(e, radius_lines=0) for e in test_examples]
+
+          encoder = CodeRankEncoder(max_length=512, normalize_embeddings=False)
+          shell = CodeDecisionModel(
+              encoder=encoder,
+              dim=encoder.dim,
+              scorer=PairwiseMLPScorer(encoder.dim, hidden=32),
+          )
+          encoded = preencode_examples(shell, [*train_focus, *test_focus], batch_size=8)
+          n_train = len(train_focus)
+          encoded_train = encoded[:n_train]
+          encoded_test = encoded[n_train:]
+
+          torch.manual_seed(2)
+          shell.scorer = PairwiseMLPScorer(encoder.dim, hidden=32)
+          optimizer = torch.optim.AdamW(
+              shell.scorer.parameters(), lr=1e-3, weight_decay=1e-2
+          )
+          order = torch.randperm(
+              len(encoded_train),
+              generator=torch.Generator().manual_seed(20001),
+          ).tolist()
+          shell.scorer.train()
+          for start in range(0, len(order), 32):
+              ids = order[start:start + 32]
+              batch = collate_encoded_examples([encoded_train[i] for i in ids])
+              optimizer.zero_grad(set_to_none=True)
+              logits = shell.score_encoded_batch(
+                  batch.contexts, batch.questions, batch.candidate_embeddings
+              )
+              loss = torch.nn.functional.cross_entropy(logits, batch.targets)
+              loss.backward()
+              torch.nn.utils.clip_grad_norm_(shell.scorer.parameters(), 1.0)
+              optimizer.step()
+
+          shell.scorer.eval()
+          predicate = CallSiteBindable()
+          decisions = []
+          with torch.no_grad():
+              for example, item in zip(test_examples, encoded_test):
+                  scores = shell.score_encoded(
+                      item.decision_context, item.candidate_embeddings
+                  )
+                  ranking = tuple(
+                      sorted(
+                          range(len(example.candidates)),
+                          key=lambda i: (-float(scores[i]), i),
+                      )
+                  )
+                  allowed = predicate.check(
+                      example.context, example.question, example.candidates
+                  ).allowed
+                  if not allowed[example.answer_index]:
+                      raise RuntimeError(
+                          f"E024 soundness failure: {HELDOUT} {example.source}"
+                      )
+                  decisions.append((example, ranking, allowed))
+
+          top1_correct = sum(ranking[0] == e.answer_index for e, ranking, _ in decisions)
+          if top1_correct != EXPECTED[HELDOUT]["top1"]:
+              raise RuntimeError(
+                  f"top1 drift {HELDOUT}: {top1_correct} != {EXPECTED[HELDOUT]['top1']}"
+              )
+
+          wrong = [
+              (example, ranking, allowed)
+              for example, ranking, allowed in decisions
+              if ranking[0] != example.answer_index
+          ]
+          if len(wrong) != EXPECTED[HELDOUT]["wrong"]:
+              raise RuntimeError(
+                  f"wrong-count drift {HELDOUT}: {len(wrong)} != {EXPECTED[HELDOUT]['wrong']}"
+              )
+
+          del encoded_train, encoded_test, encoded, shell, encoder, optimizer
+          gc.collect()
+
+          tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
+          model = AutoModelForCausalLM.from_pretrained(
+              MODEL_ID, revision=MODEL_REVISION, torch_dtype=torch.float32
+          )
+          model.eval()
+
+          def frozen_prompt(example, recommendation):
+              blocks = [
+                  "Choose the one candidate that should replace __CALL_TARGET__.",
+                  "Return only one digit: 1, 2, 3, or 4. Do not return code or explanation.",
+                  "Caller:\n" + example.context,
+              ]
+              for i, candidate in enumerate(example.candidates):
+                  blocks.append(f"Candidate {i + 1}:\n{candidate}")
+              blocks.append(
+                  "Repository decision evidence (fallible): "
+                  f"candidate {recommendation + 1} is recommended."
+              )
+              return "\n\n".join(blocks)
+
+          def correction_prompt(example, rejected, recommendation):
+              active = [i for i in range(len(example.candidates)) if i != rejected]
+              allowed_numbers = ", ".join(str(i + 1) for i in active)
+              blocks = [
+                  "Choose the one candidate that should replace __CALL_TARGET__.",
+                  f"Return only one digit from: {allowed_numbers}. Do not return code or explanation.",
+                  "Caller:\n" + example.context,
+              ]
+              for i in active:
+                  blocks.append(f"Candidate {i + 1}:\n{example.candidates[i]}")
+              if recommendation is not None:
+                  blocks.append(
+                      "Repository decision evidence (fallible): "
+                      f"candidate {recommendation + 1} is recommended."
+                  )
+              blocks.append(
+                  "That candidate violates the repository constraint. "
+                  "Choose another candidate number."
+              )
+              blocks.append(
+                  f"Candidate {rejected + 1} was rejected by the deterministic verifier "
+                  "and is no longer eligible."
+              )
+              return "\n\n".join(blocks)
+
+          choice_re = re.compile(
+              r"^(?:candidate\s*)?([1-4])(?:[.)]?)$",
+              re.IGNORECASE,
+          )
+
+          def generate_choice(prompt):
+              messages = [
+                  {
+                      "role": "system",
+                      "content": (
+                          "You are a precise code decision engine. "
+                          "Answer only with the requested candidate digit."
+                      ),
+                  },
+                  {"role": "user", "content": prompt},
+              ]
+              rendered = tokenizer.apply_chat_template(
+                  messages, tokenize=False, add_generation_prompt=True
+              )
+              inputs = tokenizer(rendered, return_tensors="pt")
+              t0 = time.perf_counter()
+              with torch.inference_mode():
+                  output = model.generate(
+                      **inputs,
+                      max_new_tokens=8,
+                      do_sample=False,
+                      num_beams=1,
+                      pad_token_id=tokenizer.eos_token_id,
+                      eos_token_id=tokenizer.eos_token_id,
+                  )
+              seconds = time.perf_counter() - t0
+              generated = output[0, inputs["input_ids"].shape[-1]:]
+              text = tokenizer.decode(generated, skip_special_tokens=True).strip()
+              match = choice_re.fullmatch(text)
+              parsed = int(match.group(1)) - 1 if match else None
+              return {"raw": text, "parsed": parsed, "seconds": seconds}
+
+          records = []
+          for example, ranking, allowed in wrong:
+              first_rec = ranking[0]
+              first = generate_choice(frozen_prompt(example, first_rec))
+              if first["parsed"] != first_rec:
+                  raise RuntimeError(
+                      f"first-turn reproduction failed {HELDOUT} {example.source}: "
+                      f"parsed={first['parsed']} rec={first_rec}"
+                  )
+
+              next_rec = next(
+                  (
+                      index for index in ranking
+                      if index != first_rec and allowed[index]
+                  ),
+                  None,
+              )
+
+              memory = generate_choice(
+                  correction_prompt(example, first_rec, recommendation=None)
+              )
+              ranked = generate_choice(
+                  correction_prompt(example, first_rec, recommendation=next_rec)
+              )
+              memory["correct"] = memory["parsed"] == example.answer_index
+              ranked["correct"] = ranked["parsed"] == example.answer_index
+              ranked["followed_recommendation"] = (
+                  next_rec is not None and ranked["parsed"] == next_rec
+              )
+
+              records.append({
+                  "repo": HELDOUT,
+                  "task": task_kind(example),
+                  "source": example.source,
+                  "answer_index": example.answer_index,
+                  "ranking": ranking,
+                  "allowed": allowed,
+                  "first_recommendation": first_rec,
+                  "first": first,
+                  "next_feasible_recommendation": next_rec,
+                  "next_feasible_correct": next_rec == example.answer_index,
+                  "memory": memory,
+                  "ranked": ranked,
+              })
+
+          memory_success = sum(r["memory"]["correct"] for r in records)
+          if memory_success != EXPECTED[HELDOUT]["memory_wrong_success"]:
+              raise RuntimeError(
+                  f"E029 reproduction drift {HELDOUT}: {memory_success} "
+                  f"!= {EXPECTED[HELDOUT]['memory_wrong_success']}"
+              )
+
+          both = sum(r["memory"]["correct"] and r["ranked"]["correct"] for r in records)
+          ranked_only = sum(
+              r["ranked"]["correct"] and not r["memory"]["correct"] for r in records
+          )
+          memory_only = sum(
+              r["memory"]["correct"] and not r["ranked"]["correct"] for r in records
+          )
+          neither = len(records) - both - ranked_only - memory_only
+
+          summary = {
+              "heldout_repo": HELDOUT,
+              "tasks": len(test_examples),
+              "wrong_recommendations": len(records),
+              "top1_correct": top1_correct,
+              "memory_wrong_successes": memory_success,
+              "ranked_wrong_successes": sum(r["ranked"]["correct"] for r in records),
+              "next_feasible_correct": sum(r["next_feasible_correct"] for r in records),
+              "ranked_followed_next_recommendation": sum(
+                  r["ranked"]["followed_recommendation"] for r in records
+              ),
+              "paired": {
+                  "both": both,
+                  "ranked_only": ranked_only,
+                  "memory_only": memory_only,
+                  "neither": neither,
+              },
+              "reconstructed_overall": {
+                  "memory": top1_correct + memory_success,
+                  "ranked": top1_correct + sum(r["ranked"]["correct"] for r in records),
+              },
+              "extraction": extraction,
+          }
+          path = f"/tmp/e032-live-{HELDOUT}.json"
+          with open(path, "w", encoding="utf-8") as handle:
+              json.dump(
+                  {"summary": summary, "records": records},
+                  handle, indent=2, sort_keys=True
+              )
+          print("E032_LIVE_FOLD=" + json.dumps(summary, sort_keys=True))
+          PY
+      - name: Upload fold records
+        uses: actions/upload-artifact@v4
+        with:
+          name: e032-live-${{ matrix.heldout }}
+          path: /tmp/e032-live-${{ matrix.heldout }}.json
+
+  aggregate:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e032-live-*
+          path: /tmp/e032-live
+          merge-multiple: true
+      - name: Aggregate E032 correction comparison
+        run: |
+          python - <<'PY'
+          import glob
+          import json
+          import math
+          import random
+          from collections import defaultdict
+
+          folds = []
+          records = []
+          for path in sorted(glob.glob("/tmp/e032-live/e032-live-*.json")):
+              with open(path, encoding="utf-8") as handle:
+                  payload = json.load(handle)
+              folds.append(payload["summary"])
+              records.extend(payload["records"])
+
+          if len(folds) != 4 or len(records) != 164:
+              raise RuntimeError(
+                  f"expected 4 folds and 164 wrong-recommendation records, "
+                  f"got {len(folds)} and {len(records)}"
+              )
+
+          memory = sum(r["memory"]["correct"] for r in records)
+          ranked = sum(r["ranked"]["correct"] for r in records)
+          if memory != 56:
+              raise RuntimeError(f"E029 aggregate reproduction drift: {memory} != 56")
+
+          both = sum(r["memory"]["correct"] and r["ranked"]["correct"] for r in records)
+          ranked_only = sum(
+              r["ranked"]["correct"] and not r["memory"]["correct"] for r in records
+          )
+          memory_only = sum(
+              r["memory"]["correct"] and not r["ranked"]["correct"] for r in records
+          )
+          neither = len(records) - both - ranked_only - memory_only
+
+          def two_sided_binomial(k, n):
+              if n == 0:
+                  return 1.0
+              low = min(k, n - k)
+              tail = sum(math.comb(n, i) for i in range(low + 1)) / (2 ** n)
+              return min(1.0, 2.0 * tail)
+
+          groups = defaultdict(lambda: defaultdict(list))
+          for r in records:
+              groups[r["repo"]][r["source"]].append(r)
+
+          rng = random.Random(32032)
+          boot = []
+          for _ in range(5000):
+              sample = []
+              for repo in sorted(groups):
+                  sources = sorted(groups[repo])
+                  for _ in range(len(sources)):
+                      source = rng.choice(sources)
+                      sample.extend(groups[repo][source])
+              delta = (
+                  sum(r["ranked"]["correct"] for r in sample)
+                  - sum(r["memory"]["correct"] for r in sample)
+              ) / len(sample)
+              boot.append(delta)
+
+          def percentile(values, q):
+              xs = sorted(values)
+              pos = (len(xs) - 1) * q
+              lo = int(math.floor(pos))
+              hi = int(math.ceil(pos))
+              if lo == hi:
+                  return xs[lo]
+              w = pos - lo
+              return xs[lo] * (1 - w) + xs[hi] * w
+
+          report = {
+              "wrong_recommendations": len(records),
+              "memory_wrong_successes": memory,
+              "ranked_wrong_successes": ranked,
+              "wrong_subset_delta_points": 100 * (ranked - memory) / len(records),
+              "paired": {
+                  "both": both,
+                  "ranked_only": ranked_only,
+                  "memory_only": memory_only,
+                  "neither": neither,
+                  "mcnemar_exact_two_sided_p": two_sided_binomial(
+                      ranked_only, ranked_only + memory_only
+                  ),
+              },
+              "next_feasible_correct": sum(
+                  r["next_feasible_correct"] for r in records
+              ),
+              "ranked_followed_next_recommendation": sum(
+                  r["ranked"]["followed_recommendation"] for r in records
+              ),
+              "reconstructed_overall_successes": {
+                  "e029_memory": 236 + memory,
+                  "e032_ranked": 236 + ranked,
+              },
+              "overall_delta_points": 100 * (ranked - memory) / 400,
+              "wrong_subset_cluster_bootstrap_95ci": [
+                  percentile(boot, 0.025),
+                  percentile(boot, 0.975),
+              ],
+              "folds": folds,
+          }
+
+          with open("/tmp/e032-live-aggregate.json", "w", encoding="utf-8") as handle:
+              json.dump(
+                  {"summary": report, "records": records},
+                  handle, indent=2, sort_keys=True
+              )
+          print("E032_LIVE_AGGREGATE=" + json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e032-live-aggregate
+          path: /tmp/e032-live-aggregate.json
