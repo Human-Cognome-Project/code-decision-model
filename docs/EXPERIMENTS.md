@@ -71,3 +71,11 @@ See [E022_LIVE_QWEN_RESULT.md](E022_LIVE_QWEN_RESULT.md).
 The first pinned Qwen 0.5B pilot produced zero verified repairs in either arm.
 The result is inconclusive for correction-turn reduction because the generator
 did not cross the deterministic validity floor.
+
+## E023 — Structured-edit corrective turns
+
+See [E023_STRUCTURED_EDIT.md](E023_STRUCTURED_EDIT.md).
+
+Removes full-function generation. The generator emits only a candidate index;
+deterministic code applies the edit. Measures whether fallible decision evidence
+reduces wrong-selection correction turns.
