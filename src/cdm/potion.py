@@ -42,7 +42,11 @@ class PotionCodeEncoder(nn.Module):
             kwargs = {"max_length": max_length}
             if normalize_embeddings is not None:
                 kwargs["normalize"] = normalize_embeddings
-            model = StaticModel.from_pretrained(\n                model_name,\n                force_download=False,\n                **kwargs,\n            )
+            model = StaticModel.from_pretrained(
+                model_name,
+                force_download=False,
+                **kwargs,
+            )
         else:
             if hasattr(model, "max_length"):
                 model.max_length = max_length
