@@ -51,6 +51,18 @@ do worse than baseline; the harness does not assume benefit.
   - terminal failure rate
   - breakdown by repository and function-vs-method task
 
+## Adapter scaffolding
+
+- `cdm.hf_generator.HFCausalRepairGenerator` — optional Hugging Face causal LM
+  adapter implementing `RepairGenerator`. Loads only when constructed without
+  injected tokenizer/model; requires `pip install -e ".[hf]"`.
+- `examples/run_corrective_turn_hf_smoke.py` — optional single-example smoke
+  (downloads weights; not part of default CI).
+- Unit tests inject fakes; no network in `pytest`.
+
+Default smoke pin: `Salesforce/codegen-350M-mono` (replace with any pinned
+open causal code model when running the real held-out experiment).
+
 ## Out of scope for E022
 
 - Expanding the generator or decision head before the measurement exists.
