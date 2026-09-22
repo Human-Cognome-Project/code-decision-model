@@ -46,8 +46,9 @@ def parse(value):
 
     try:
         factory = make_hf_generator_factory(
-            model_name="Salesforce/codegen-350M-mono",
-            max_new_tokens=128,
+            model_name="Qwen/Qwen2.5-Coder-0.5B-Instruct",
+            revision="ea3f2471cf1b1f0db85067f1ef93848e38e88c25",
+            max_new_tokens=512,
             temperature=0.0,
             seed=0,
         )
