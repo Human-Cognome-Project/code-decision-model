@@ -44,3 +44,11 @@ Adds a minimal interface so deterministic validators can veto or filter
 candidates after neural scoring. Unique priors stay outside the model as
 machine-checkable constraints; an empty surviving set produces an explicit
 escalate signal.
+
+## E022 — Open generator on the corrective-turn harness
+
+See [E022_OPEN_GENERATOR_REPAIR.md](E022_OPEN_GENERATOR_REPAIR.md).
+
+Attaches a generator (mock first, real open model next) to the E021 repair
+harness and measures paired correction turns with vs without a fallible
+decision recommendation.
