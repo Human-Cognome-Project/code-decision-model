@@ -118,9 +118,15 @@ Report:
 - assisted successes / tasks;
 - paired assisted-minus-baseline success-rate delta.
 
-The replication supports the E027 effect if the direction is positive under the
-frozen protocol. Statistical uncertainty is reported rather than converted into
-a new tuning rule.
+The confirmatory replication gate passes only if all three conditions hold:
+
+1. the pooled assisted success rate is higher than baseline;
+2. the exact two-sided McNemar test gives **p < 0.05**; and
+3. the 95% repository-stratified source-file bootstrap interval for the pooled
+   success-rate delta has a lower bound **greater than 0**.
+
+If any condition fails, record E031 as not confirming the E027 effect under this
+preregistered gate. Do not change the criterion after seeing the result.
 
 ## Predeclared statistics
 
