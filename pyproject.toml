@@ -11,7 +11,7 @@ license = {text = "Apache-2.0"}
 dependencies = ["torch>=2.2"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0"]\nhf = ["transformers>=4.45"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
