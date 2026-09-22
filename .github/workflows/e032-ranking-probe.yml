@@ -1,0 +1,332 @@
+name: e032-ranking-probe
+
+on:
+  push:
+    branches: ["analysis/e032-ranking-probe"]
+
+jobs:
+  benchmark:
+    strategy:
+      fail-fast: false
+      matrix:
+        heldout: [browser-use, crawl4ai, markitdown, scrapling]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Restore model cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: e032-coderank-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install scorer dependencies
+        run: python -m pip install -e ".[coderank]"
+      - name: Clone exact E027 revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"
+            sha="$2"
+            dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/recent
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/recent/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/recent/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/recent/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/recent/scrapling
+      - name: Probe frozen scorer ranking
+        env:
+          HELDOUT_REPO: ${{ matrix.heldout }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+
+          import torch
+
+          from cdm import CodeDecisionModel, CodeRankEncoder, PairwiseMLPScorer
+          from cdm.binding import CallSiteBindable
+          from cdm.focus import focus_hard_call_context
+          from cdm.methods import repository_hard_masked_method_call_examples
+          from cdm.repository import (
+              namespace_repository_examples,
+              repository_hard_masked_call_examples,
+          )
+          from cdm.training import collate_encoded_examples, preencode_examples
+
+          REPOS = {
+              "browser-use": "/tmp/recent/browser-use",
+              "crawl4ai": "/tmp/recent/crawl4ai",
+              "markitdown": "/tmp/recent/markitdown",
+              "scrapling": "/tmp/recent/scrapling",
+          }
+          EXPECTED = {
+              "browser-use": {"test": 210, "top1": 133},
+              "crawl4ai": {"test": 160, "top1": 83},
+              "markitdown": {"test": 17, "top1": 11},
+              "scrapling": {"test": 13, "top1": 9},
+          }
+          HELDOUT = os.environ["HELDOUT_REPO"]
+          K = 4
+          BODY_CHARS = 512
+
+          def repo_of(example):
+              return example.source.split("::", 1)[0]
+
+          pooled = []
+          extraction = {}
+          for name, root in REPOS.items():
+              funcs = repository_hard_masked_call_examples(
+                  root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+              )
+              methods = repository_hard_masked_method_call_examples(
+                  root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+              )
+              extraction[name] = {"functions": len(funcs), "methods": len(methods)}
+              pooled.extend(namespace_repository_examples(funcs, name))
+              pooled.extend(namespace_repository_examples(methods, name))
+
+          train_examples = [e for e in pooled if repo_of(e) != HELDOUT]
+          test_examples = [e for e in pooled if repo_of(e) == HELDOUT]
+          if len(test_examples) != EXPECTED[HELDOUT]["test"]:
+              raise RuntimeError(
+                  f"test-count drift {HELDOUT}: {len(test_examples)} "
+                  f"!= {EXPECTED[HELDOUT]['test']}"
+              )
+
+          train_focus = [focus_hard_call_context(e, radius_lines=0) for e in train_examples]
+          test_focus = [focus_hard_call_context(e, radius_lines=0) for e in test_examples]
+
+          encoder = CodeRankEncoder(max_length=512, normalize_embeddings=False)
+          shell = CodeDecisionModel(
+              encoder=encoder,
+              dim=encoder.dim,
+              scorer=PairwiseMLPScorer(encoder.dim, hidden=32),
+          )
+          encoded = preencode_examples(shell, [*train_focus, *test_focus], batch_size=8)
+          n_train = len(train_focus)
+          encoded_train = encoded[:n_train]
+          encoded_test = encoded[n_train:]
+
+          torch.manual_seed(2)
+          shell.scorer = PairwiseMLPScorer(encoder.dim, hidden=32)
+          optimizer = torch.optim.AdamW(
+              shell.scorer.parameters(), lr=1e-3, weight_decay=1e-2
+          )
+          order = torch.randperm(
+              len(encoded_train),
+              generator=torch.Generator().manual_seed(20001),
+          ).tolist()
+          shell.scorer.train()
+          for start in range(0, len(order), 32):
+              ids = order[start:start + 32]
+              batch = collate_encoded_examples([encoded_train[i] for i in ids])
+              optimizer.zero_grad(set_to_none=True)
+              logits = shell.score_encoded_batch(
+                  batch.contexts, batch.questions, batch.candidate_embeddings
+              )
+              loss = torch.nn.functional.cross_entropy(logits, batch.targets)
+              loss.backward()
+              torch.nn.utils.clip_grad_norm_(shell.scorer.parameters(), 1.0)
+              optimizer.step()
+
+          shell.scorer.eval()
+          predicate = CallSiteBindable()
+          records = []
+          with torch.no_grad():
+              for example, item in zip(test_examples, encoded_test):
+                  scores = shell.score_encoded(
+                      item.decision_context, item.candidate_embeddings
+                  )
+                  ranking = tuple(
+                      sorted(
+                          range(len(example.candidates)),
+                          key=lambda i: (-float(scores[i]), i),
+                      )
+                  )
+                  top1 = ranking[0]
+                  top2_hit = example.answer_index in ranking[:2]
+                  allowed = predicate.check(
+                      example.context, example.question, example.candidates
+                  ).allowed
+                  if not allowed[example.answer_index]:
+                      raise RuntimeError(
+                          f"E024 soundness failure: {HELDOUT} {example.source}"
+                      )
+                  feasible = [i for i in ranking if allowed[i]]
+                  if not feasible:
+                      raise RuntimeError(
+                          f"no feasible candidate: {HELDOUT} {example.source}"
+                      )
+                  first_feasible = feasible[0]
+                  after_first_reject = [i for i in feasible if i != first_feasible]
+                  second_feasible = after_first_reject[0] if after_first_reject else None
+                  records.append({
+                      "source": example.source,
+                      "answer_index": example.answer_index,
+                      "ranking": ranking,
+                      "top1_correct": top1 == example.answer_index,
+                      "top2_hit": top2_hit,
+                      "allowed": allowed,
+                      "top1_vetoed": not allowed[top1],
+                      "first_feasible": first_feasible,
+                      "first_feasible_correct": first_feasible == example.answer_index,
+                      "second_feasible": second_feasible,
+                      "second_feasible_correct": second_feasible == example.answer_index,
+                      "predicted_two_turn_success": (
+                          first_feasible == example.answer_index
+                          or second_feasible == example.answer_index
+                      ),
+                  })
+
+          top1_correct = sum(r["top1_correct"] for r in records)
+          if top1_correct != EXPECTED[HELDOUT]["top1"]:
+              raise RuntimeError(
+                  f"top1 reproduction drift {HELDOUT}: {top1_correct} "
+                  f"!= {EXPECTED[HELDOUT]['top1']}"
+              )
+
+          wrong_top1 = [r for r in records if not r["top1_correct"]]
+          summary = {
+              "heldout_repo": HELDOUT,
+              "tasks": len(records),
+              "top1_correct": top1_correct,
+              "top2_hits": sum(r["top2_hit"] for r in records),
+              "wrong_top1": len(wrong_top1),
+              "rank2_correct_given_top1_wrong": sum(
+                  r["ranking"][1] == r["answer_index"] for r in wrong_top1
+              ),
+              "top1_vetoed": sum(r["top1_vetoed"] for r in records),
+              "gated_first_correct": sum(
+                  r["first_feasible_correct"] for r in records
+              ),
+              "gating_improvements": sum(
+                  (not r["top1_correct"]) and r["first_feasible_correct"]
+                  for r in records
+              ),
+              "next_feasible_correct_after_wrong_first": sum(
+                  r["second_feasible_correct"]
+                  for r in records
+                  if not r["first_feasible_correct"]
+              ),
+              "wrong_first_feasible": sum(
+                  not r["first_feasible_correct"] for r in records
+              ),
+              "predicted_two_turn_successes": sum(
+                  r["predicted_two_turn_success"] for r in records
+              ),
+              "extraction": extraction,
+          }
+
+          path = f"/tmp/e032-rank-{HELDOUT}.json"
+          with open(path, "w", encoding="utf-8") as handle:
+              json.dump(
+                  {"summary": summary, "records": records},
+                  handle,
+                  indent=2,
+                  sort_keys=True,
+              )
+          print("E032_RANK_JSON=" + json.dumps(summary, sort_keys=True))
+          PY
+      - name: Upload fold ranking records
+        uses: actions/upload-artifact@v4
+        with:
+          name: e032-rank-${{ matrix.heldout }}
+          path: /tmp/e032-rank-${{ matrix.heldout }}.json
+
+  aggregate:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e032-rank-*
+          path: /tmp/e032-rank
+          merge-multiple: true
+      - name: Aggregate ranking probe
+        run: |
+          python - <<'PY'
+          import glob
+          import json
+
+          folds = []
+          records = []
+          for path in sorted(glob.glob("/tmp/e032-rank/e032-rank-*.json")):
+              with open(path, encoding="utf-8") as handle:
+                  payload = json.load(handle)
+              folds.append(payload["summary"])
+              records.extend(payload["records"])
+
+          if len(folds) != 4 or len(records) != 400:
+              raise RuntimeError(
+                  f"expected 4 folds and 400 records, got {len(folds)}, {len(records)}"
+              )
+
+          wrong_top1 = [r for r in records if not r["top1_correct"]]
+          wrong_first_feasible = [
+              r for r in records if not r["first_feasible_correct"]
+          ]
+          report = {
+              "tasks": len(records),
+              "top1_correct": sum(r["top1_correct"] for r in records),
+              "top2_hits": sum(r["top2_hit"] for r in records),
+              "wrong_top1": len(wrong_top1),
+              "rank2_correct_given_top1_wrong": sum(
+                  r["ranking"][1] == r["answer_index"] for r in wrong_top1
+              ),
+              "conditional_rank2_rate": (
+                  sum(r["ranking"][1] == r["answer_index"] for r in wrong_top1)
+                  / len(wrong_top1)
+              ),
+              "top1_vetoed": sum(r["top1_vetoed"] for r in records),
+              "gated_first_correct": sum(
+                  r["first_feasible_correct"] for r in records
+              ),
+              "gating_improvements": sum(
+                  (not r["top1_correct"]) and r["first_feasible_correct"]
+                  for r in records
+              ),
+              "wrong_first_feasible": len(wrong_first_feasible),
+              "next_feasible_correct_after_wrong_first": sum(
+                  r["second_feasible_correct"] for r in wrong_first_feasible
+              ),
+              "conditional_next_feasible_rate": (
+                  sum(r["second_feasible_correct"] for r in wrong_first_feasible)
+                  / len(wrong_first_feasible)
+              ),
+              "predicted_two_turn_successes": sum(
+                  r["predicted_two_turn_success"] for r in records
+              ),
+              "predicted_two_turn_rate": (
+                  sum(r["predicted_two_turn_success"] for r in records)
+                  / len(records)
+              ),
+              "frozen_e027_successes": 289,
+              "e029_memory_successes": 292,
+              "folds": folds,
+          }
+          with open("/tmp/e032-ranking-aggregate.json", "w", encoding="utf-8") as handle:
+              json.dump(
+                  {"summary": report, "records": records},
+                  handle,
+                  indent=2,
+                  sort_keys=True,
+              )
+          print("E032_RANK_AGGREGATE=" + json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e032-ranking-aggregate
+          path: /tmp/e032-ranking-aggregate.json
