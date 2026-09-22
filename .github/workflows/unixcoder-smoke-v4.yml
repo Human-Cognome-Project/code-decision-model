@@ -1,0 +1,27 @@
+name: unixcoder-real-smoke-v4
+
+on:
+  push:
+    branches: ["experiment/unixcoder-real-smoke-v4"]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: unixcoder-base-v4-${{ runner.os }}-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project with Hugging Face dependencies
+        run: python -m pip install -e ".[hf]"
+      - name: Run real checkpoint smoke
+        run: python examples/unixcoder_smoke.py
