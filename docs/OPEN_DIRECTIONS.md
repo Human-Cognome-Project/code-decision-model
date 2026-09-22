@@ -24,22 +24,42 @@ E029 then removed verifier-rejected candidates from the correction turn. It near
 
 Do not spend cycles prompt-tuning E029 on the development repositories.
 
-## Active direction — E032 ranked feasible re-recommendation
+## E032 ranked feasible re-recommendation — development-set result complete
 
-The scorer-only probe found useful residual signal:
+The final live intervention preserves the E029 correction prompt exactly and
+appends the historical recommendation sentence for the scorer's next feasible
+candidate.
 
-- rank 2 correct on 77/164 top-1 errors (47.0%);
-- E024 gating changed only 1/400 first recommendations;
-- scorer-implied two-turn ceiling: 313/400 (78.25%).
+Result:
 
-The live test should isolate **post-rejection evidence**:
+- E029: 292/400 (73.0%) success within two attempts;
+- E032: 315/400 (78.75%);
+- wrong-first-recommendation recovery: 56/164 (34.1%) -> 79/164 (48.2%);
+- wrong-subset delta: +14.02 pp;
+- exact McNemar p = 0.0128;
+- source-file-clustered bootstrap 95% CI: +2.07 to +25.49 pp;
+- second recommendation followed on 156/164 correction turns.
 
-1. keep the historical first turn unchanged;
-2. deterministically remove the rejected candidate;
-3. compare E029's no-recommendation correction turn with E032's next-feasible ranked recommendation;
-4. use the same two-attempt budget.
+This is useful exploratory evidence but it was finalized on the development
+repositories after a prompt-order ambiguity was discovered there.
 
-Stop E032 if the live ranked arm does not materially beat E029 on wrong-recommendation tasks.
+### Next E032 gate
+
+Freeze the exact final prompt and replicate the ranked-correction mechanism on
+the E031 independent repository set.
+
+Do not change:
+
+- scorer recipe;
+- first-turn prompt;
+- E029 correction prefix;
+- appended recommendation wording;
+- parser;
+- two-attempt budget;
+- statistics.
+
+A failure to reproduce the correction benefit on the E031 repositories should
+stop treating ranked re-recommendation as a general mechanism.
 
 ## E033 — call-expression intent (stopped at validity gate)
 
