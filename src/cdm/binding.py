@@ -7,9 +7,9 @@ could bind every masked call site in the caller.
 
 Everything comes from the AST. The predicate never consults a model, and missing
 information never vetoes: an unparseable caller, an absent call site, or an
-unreadable candidate signature leaves the candidate allowed. The important
-guarantee is soundness (the machine-labelled target always survives), not
-completeness.
+unreadable candidate signature leaves the candidate allowed. The implementation
+is deliberately biased toward avoiding false vetoes; current labelled corpora and
+tests act as empirical soundness regression checks rather than a universal proof.
 """
 from __future__ import annotations
 
