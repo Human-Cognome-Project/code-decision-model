@@ -19,3 +19,18 @@ This addresses two separate questions:
 
 Because it is a preprocessing transform, it can be applied consistently to UniXcoder and any
 later compact encoder comparison.
+
+
+## Compact-header mode
+
+For pathological signatures or decorators, the complete function prefix can itself exceed a
+bounded encoder window. Setting `compact_header=True` replaces decorators and the complete
+signature with only:
+
+    def function_name(...):
+
+or its async equivalent.
+
+This preserves the caller identity and async status while guaranteeing that annotations,
+defaults, decorators, and long signatures cannot push the call site out of view. The compact
+mode is evaluated separately because those removed details may themselves carry useful evidence.
