@@ -73,17 +73,22 @@ These results support the frozen structured-selection task. They are not claims 
 
 Independent replication is complete. Current work asks what parts of the mechanism generalize beyond the original index-selection surface.
 
+Two post-replication mechanism results now sharpen that question:
+
+- **E032 ranked re-recommendation:** on the original development repositories, replacing rejected evidence with the scorer's next feasible ranked recommendation improved success from 292/400 (73.0%) under E029 to 315/400 (78.75%). On wrong-first-recommendation tasks, recovery improved from 56/164 (34.1%) to 79/164 (48.2%), with exact McNemar p = 0.0128. This remains exploratory until the exact final intervention is replicated on the E031 independent repositories.
+- **E033 call-expression intent:** a baseline-only 64-task validity pilot reached only 23/64 uniquely resolved/bindable calls and 2/64 exact repairs. The free-form call-expression surface is stopped for the pinned 0.5B generator.
+
 Active directions include:
 
-- **E032 ranked re-recommendation:** after deterministic rejection, test whether the scorer's next feasible ranked choice improves recovery over E029's no-evidence correction turn;
-- **E033 call-expression intent:** test whether a compact generator can emit actual Python call expressions under deterministic parse, membership, bindability, and AST-equivalence checks;
+- independent replication of the exact final E032 correction intervention on the E031 repository set;
+- a narrower machine-checkable AST-operation schema as the successor to E033;
 - replication with a second compact open generator;
 - harder cross-file/LSP/compiler/type-checker decision tasks;
 - repository-scale retrieval followed by decision reranking;
 - calibrated escalation on unseen repositories;
 - cheaper decision paths that preserve the end-to-end effect.
 
-E029 rejection memory is retained as a useful control, but its live end-to-end gain was near-null: 289/400 to 292/400 (+0.75 pp).
+E029 rejection memory remains a useful control: it nearly eliminated repeated rejected choices but produced only a +0.75 pp end-to-end gain.
 
 See [docs/OPEN_DIRECTIONS.md](docs/OPEN_DIRECTIONS.md).
 
