@@ -209,3 +209,20 @@ Mock:
 ```bash
 python examples/run_ranked_memory_mock.py
 ```
+
+## E033 — Call-expression intent
+
+See [E033_CALL_INTENT.md](E033_CALL_INTENT.md).
+
+First structured edit richer than an index: the generator emits one Python call
+expression, deterministic code splices it into the caller, and a four-stage
+verifier (parse, candidate membership, E024 bindability, AST equivalence)
+judges it with category-only feedback. Opens the question of whether a compact
+generator can write real code under hard predicates.
+
+Mock and census:
+
+```bash
+python examples/run_call_intent_mock.py
+python examples/census_call_intent.py
+```
