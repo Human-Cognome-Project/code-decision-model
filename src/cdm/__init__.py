@@ -10,6 +10,18 @@ from .text import HashTextEncoder
 from .unixcoder import UniXcoderEncoder
 from .coderank import CodeRankEncoder
 from .potion import PotionCodeEncoder
+from .repair import (
+    PairedRepairOutcome,
+    RepairAttempt,
+    RepairOutcome,
+    RepairVerification,
+    build_repair_prompt,
+    expected_repair_source,
+    feedback_for,
+    run_paired_repair,
+    run_repair_loop,
+    verify_repair,
+)
 from .constraints import (
     AllAllowed,
     ConstrainedDecision,
@@ -29,6 +41,16 @@ __all__ = [
     "UniXcoderEncoder",
     "CodeRankEncoder",
     "PotionCodeEncoder",
+    "PairedRepairOutcome",
+    "RepairAttempt",
+    "RepairOutcome",
+    "RepairVerification",
+    "build_repair_prompt",
+    "expected_repair_source",
+    "feedback_for",
+    "run_paired_repair",
+    "run_repair_loop",
+    "verify_repair",
     "AllAllowed",
     "ConstrainedDecision",
     "Constraint",
