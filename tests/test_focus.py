@@ -109,3 +109,47 @@ def test_focus_validates_task_radius_and_marker():
         assert "radius_lines" in str(exc)
     else:
         raise AssertionError("expected radius validation")
+
+
+def test_compact_header_removes_decorators_and_signature_details():
+    example = _example(
+        """@decorator(alpha=1)
+async def caller(
+    payload: VeryLongGeneric[One, Two, Three],
+    *,
+    mode: str = "x",
+):
+    prepared = payload
+    return await __CALL_TARGET__(prepared)
+"""
+    )
+
+    focused = focus_hard_call_context(
+        example,
+        radius_lines=0,
+        compact_header=True,
+    )
+
+    assert focused.context.startswith("async def caller(...):")
+    assert "@decorator" not in focused.context
+    assert "VeryLongGeneric" not in focused.context
+    assert "__CALL_TARGET__" in focused.context
+
+
+def test_compact_header_applies_even_to_short_context():
+    example = _example(
+        """def caller(argument: VeryLongTypeName):
+    return __CALL_TARGET__(argument)
+"""
+    )
+
+    focused = focus_hard_call_context(
+        example,
+        radius_lines=8,
+        compact_header=True,
+    )
+
+    assert focused.context == (
+        "def caller(...):\n"
+        "    return __CALL_TARGET__(argument)"
+    )
