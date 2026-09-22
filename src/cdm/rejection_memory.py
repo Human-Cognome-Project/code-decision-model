@@ -5,8 +5,10 @@ leaves that rejected candidate and any recommendation for it in the next prompt.
 E029 turns the verifier result into a hard next-turn constraint: once rejected,
 a candidate is removed from the visible choice set and cannot be accepted again.
 
-The first prompt is intentionally delegated to E023's existing builder so first-
-turn behavior is byte-for-byte identical to the frozen protocol.
+The library first prompt is intentionally delegated to E023's existing builder so
+this intervention changes only post-rejection behavior in the library harness.
+Live replications must separately preserve the exact prompt used by the historical
+workflow they compare against.
 """
 from __future__ import annotations
 
@@ -50,7 +52,7 @@ def build_rejection_memory_prompt(
 ) -> str:
     """Build a structured-selection prompt with rejected candidates removed.
 
-    With no rejected candidates this returns the frozen E023 prompt exactly.
+    With no rejected candidates this returns the current E023 library prompt exactly.
     Original candidate numbering is preserved after exclusions so the verifier's
     answer index and recorded recommendation index remain stable.
     """
