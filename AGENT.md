@@ -28,7 +28,7 @@ The strongest completed evidence is now **E031**, the preregistered development-
 - **E029:** rejection memory reduced repeated rejected choices from 20 to 1 but changed success only from 289/400 to 292/400 (+0.75 pp; clustered 95% CI -0.96 to +2.32 pp). Treat this as a near-null end-to-end intervention.
 - **E030:** deterministic import-resolved cross-file supervision is available as a harder task family.
 - **E031:** on 421 tasks from AlphaFold, Pyodide, Optuna, and pytest, the frozen protocol improved success from 200/421 (47.5%) to 287/421 (68.2%), +20.67 pp; exact McNemar p = 1.29e-11; source-file clustered 95% CI +13.97 to +27.46 pp. The preregistered gate passed.
-- **E032:** the scorer-ranking probe found rank 2 correct on 77/164 top-1 errors (47.0%), giving a scorer-implied two-turn ceiling of 313/400. The live post-rejection ranked-memory comparison is exploratory and separate from E031.
+- **E032:** the live ranked-memory correction test improved success from 292/400 (73.0%) under E029 to 315/400 (78.75%). On 164 wrong-first-recommendation tasks, correction success rose from 56/164 (34.1%) to 79/164 (48.2%), +14.02 pp; exact McNemar p = 0.0128; clustered 95% CI +2.07 to +25.49 pp. This remains exploratory development-set evidence; replicate the exact frozen intervention on the E031 independent repositories before generalizing it.
 - **E033:** call-expression intent reached only 36/64 parse-valid calls, 23/64 uniquely resolved/bindable calls, and 2/64 exact repairs in a baseline-only validity pilot. Stop this free-form call surface for the 0.5B generator; do not rescue it with permissive deterministic reconstruction.
 
 Do not reinterpret or retune E031 after seeing its result. Do not tune the four E027 repositories merely to improve reported historical numbers.
@@ -39,7 +39,7 @@ See [docs/OPEN_DIRECTIONS.md](docs/OPEN_DIRECTIONS.md).
 
 Current high-value work includes:
 
-- finish and record the E032 live ranked-memory test;
+- replicate the exact final E032 ranked-correction intervention on the E031 independent repository set without retuning;
 - design a narrower machine-checkable AST-operation schema as the successor to the stopped E033 free-form call surface;
 - replicate the frozen E031 intervention with a second compact open generator;
 - extend deterministic supervision to harder cross-file/LSP/compiler/type-checker tasks;
