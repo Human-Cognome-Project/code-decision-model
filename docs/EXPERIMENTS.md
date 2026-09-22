@@ -125,6 +125,7 @@ next gate is unseen-repository replication.
 See [E027_UNSEEN_REPOSITORY_SPLITS.md](E027_UNSEEN_REPOSITORY_SPLITS.md).
 
 Adds the split the E025 next gate requires: held-out repositories go entirely
-to test, the rest are split source-disjoint for train/validation, with a
-machine-checkable leakage guard and a leave-one-repository-out rotation whose
+to test and all other repositories train by default, with an optional
+source-disjoint retained validation split, a machine-checkable leakage guard, and
+a leave-one-repository-out rotation whose
 folds pool under E026 statistics.
