@@ -45,10 +45,13 @@ candidates after neural scoring. Unique priors stay outside the model as
 machine-checkable constraints; an empty surviving set produces an explicit
 escalate signal.
 
-## E022 — Open generator on the corrective-turn harness
+## E021 — Corrective-turn repair harness
 
-See [E022_OPEN_GENERATOR_REPAIR.md](E022_OPEN_GENERATOR_REPAIR.md).
+See [E021_CORRECTIVE_TURN_HARNESS.md](E021_CORRECTIVE_TURN_HARNESS.md).
 
-Attaches a generator (mock first, real open model next) to the E021 repair
-harness and measures paired correction turns with vs without a fallible
-decision recommendation.
+Measures deterministic masked-call repair as a bounded baseline-vs-assisted
+correction loop.
+
+Companion example:
+[E021_CORRECTIVE_TURN_MOCK.md](E021_CORRECTIVE_TURN_MOCK.md) exercises the
+paired measurement path with deterministic mock generators and no model download.
