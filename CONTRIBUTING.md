@@ -7,6 +7,7 @@ Thank you for considering a contribution. This project is intentionally narrow a
 - Read `docs/ARCHITECTURE.md`.
 - Skim the existing experiment notes in `docs/E0xx_*.md`.
 - Read `AGENT.md` (applies to both human and automated contributors).
+- Read `docs/OPEN_DIRECTIONS.md` for the current experimental frontier and avoid duplicating completed work.
 
 ## Design constraints you must respect
 
