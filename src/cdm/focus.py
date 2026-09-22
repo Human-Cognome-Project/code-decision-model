@@ -7,7 +7,7 @@ from dataclasses import replace
 from .synthetic import DecisionExample
 
 
-_DEF = re.compile(r"^\s*(?:async\s+def|def)\s+")
+_DEF = re.compile(r"^\s*(?:async\s+def|def)\s+")\n_HARD_MASKED_CALL_TASKS = frozenset({\n    "python.hard_masked_direct_call",\n    "python.hard_masked_same_class_call",\n})
 
 
 def focus_hard_call_context(
