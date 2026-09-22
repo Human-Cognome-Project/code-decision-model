@@ -226,6 +226,23 @@ See [E032_RANKING_PROBE_RESULT.md](E032_RANKING_PROBE_RESULT.md).
 
 The frozen E027 scorer reproduced 236/400 top-1 correct decisions. On its 164 top-1 errors, rank 2 was correct 77 times (47.0%). The scorer-implied two-turn ceiling is 313/400 (78.25%), compared with 292/400 observed under E029. This passes the cheap falsifier and justifies the separate live post-rejection ranked-memory test.
 
+### E032 live ranked-memory result
+
+See [E032_RANKED_MEMORY_LIVE_RESULT.md](E032_RANKED_MEMORY_LIVE_RESULT.md).
+
+With the final correction prompt frozen as the unchanged E029 prompt plus the
+exact historical recommendation sentence appended at the end, success within
+two attempts increased from 292/400 (73.0%) under E029 to 315/400 (78.75%)
+under E032. On the 164 wrong-first-recommendation tasks, correction success rose
+from 56/164 (34.1%) to 79/164 (48.2%), a +14.02 pp gain. Exact paired McNemar
+p = 0.0128 and the source-file-clustered bootstrap 95% interval for that subset
+delta was +2.07 to +25.49 pp. The generator followed the second recommendation
+on 156/164 correction turns.
+
+This is exploratory development-set evidence. The exact final intervention
+should be replicated without changes on the E031 independent repository set
+before being treated as a general correction mechanism.
+
 ## E033 — Call-expression intent
 
 See [E033_CALL_INTENT.md](E033_CALL_INTENT.md).
