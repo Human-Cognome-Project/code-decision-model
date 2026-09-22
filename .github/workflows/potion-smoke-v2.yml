@@ -1,0 +1,56 @@
+name: potion-real-smoke-v2
+
+on:
+  push:
+    branches: ["analysis/potion-real-smoke-v2"]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install Potion dependencies
+        run: python -m pip install -e ".[potion]"
+      - name: Load real checkpoint and encode
+        run: |
+          python - <<'PY'
+          import json, time, torch
+          from cdm.potion import PotionCodeEncoder
+          from cdm import CodeDecisionModel
+
+          t0=time.perf_counter()
+          encoder=PotionCodeEncoder(max_length=None)
+          load_s=time.perf_counter()-t0
+          texts=[
+              "def read_file(path):\n    with open(path) as f:\n        return f.read()",
+              "How to read a file in Python?",
+              "def write_file(path, data):\n    open(path, 'w').write(data)",
+          ]
+          t1=time.perf_counter()
+          emb=encoder(texts)
+          encode_s=time.perf_counter()-t1
+          model=CodeDecisionModel(encoder=encoder,dim=encoder.dim,hidden=64)
+          with torch.no_grad():
+              p=model.probabilities(
+                  texts[0],
+                  "Which candidate writes a file?",
+                  [texts[0],texts[2]],
+              )
+          print("POTION_SMOKE_JSON="+json.dumps({
+              "dim":encoder.dim,
+              "shape":list(emb.shape),
+              "load_seconds":load_s,
+              "encode_3_seconds":encode_s,
+              "probabilities":p.tolist(),
+              "max_length":encoder.max_length,
+          },sort_keys=True))
+          PY
