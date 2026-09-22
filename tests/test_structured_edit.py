@@ -36,6 +36,7 @@ def test_parse_candidate_index_variants():
     assert parse_candidate_index("1", 4) == 0
     assert parse_candidate_index("candidate 2", 4) == 1
     assert parse_candidate_index("Candidate 3:", 4) == 2
+    assert parse_candidate_index("Candidate 2 because it matches", 4) is None
     assert parse_candidate_index("9", 4) is None
     assert parse_candidate_index("no number here", 4) is None
 
