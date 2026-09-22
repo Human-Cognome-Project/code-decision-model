@@ -1,4 +1,4 @@
-"""Tests for the deterministic call-site bindability predicate (E023)."""
+"""Tests for the deterministic call-site bindability predicate (E024)."""
 from __future__ import annotations
 
 from pathlib import Path
