@@ -1,0 +1,214 @@
+name: recent-encoder-bakeoff
+
+on:
+  push:
+    branches: ["analysis/recent-encoder-bakeoff"]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: code-encoder-bakeoff-${{ runner.os }}-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project and sentence-transformers
+        run: |
+          python -m pip install -e ".[hf]"
+          python -m pip install "sentence-transformers>=3,<6"
+      - name: Clone exact benchmark revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"
+            sha="$2"
+            dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/recent
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/recent/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/recent/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/recent/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/recent/scrapling
+      - name: Compare compact code encoders
+        run: |
+          python - <<'PY'
+          import gc
+          import json
+          from collections import defaultdict
+
+          import torch
+          from torch.nn import functional as F
+          from sentence_transformers import SentenceTransformer
+
+          from cdm import CodeDecisionModel, UniXcoderEncoder
+          from cdm.ablation import ablate_hard_call_identifiers
+          from cdm.repository import (
+              namespace_repository_examples,
+              repository_hard_masked_call_examples,
+          )
+          from cdm.training import preencode_examples
+
+          REPOS = {
+              "browser-use": "/tmp/recent/browser-use",
+              "crawl4ai": "/tmp/recent/crawl4ai",
+              "markitdown": "/tmp/recent/markitdown",
+              "scrapling": "/tmp/recent/scrapling",
+          }
+          K = 4
+          MAX_LENGTH = 512
+
+          full = []
+          for name, root in REPOS.items():
+              examples = repository_hard_masked_call_examples(
+                  root,
+                  candidate_count=K,
+                  candidate_body_chars=512,
+                  seed=0,
+              )
+              full.extend(namespace_repository_examples(examples, name))
+          masked = [
+              ablate_hard_call_identifiers(e, caller=True, candidates=True)
+              for e in full
+          ]
+          modes = {"full": full, "both_masked": masked}
+
+          def repo_of(example):
+              return example.source.split("::", 1)[0]
+
+          def score(examples, preds):
+              buckets = defaultdict(lambda: [0, 0])
+              correct = 0
+              for example, pred in zip(examples, preds):
+                  ok = int(pred == example.answer_index)
+                  correct += ok
+                  buckets[repo_of(example)][0] += ok
+                  buckets[repo_of(example)][1] += 1
+              return {
+                  "accuracy": correct / len(examples),
+                  "correct": correct,
+                  "count": len(examples),
+                  "by_repo": {
+                      k: {
+                          "accuracy": v[0] / v[1],
+                          "correct": v[0],
+                          "count": v[1],
+                      }
+                      for k, v in sorted(buckets.items())
+                  },
+              }
+
+          @torch.no_grad()
+          def unix_predictions(examples, encoder):
+              shell = CodeDecisionModel(encoder=encoder, dim=encoder.dim, hidden=32)
+              encoded = preencode_examples(shell, examples, batch_size=8)
+              preds = []
+              for item in encoded:
+                  context = F.normalize(item.decision_context.context.float(), dim=0)
+                  candidates = F.normalize(item.candidate_embeddings.float(), dim=1)
+                  preds.append(int(torch.mv(candidates, context).argmax()))
+              return preds
+
+          def st_predictions(examples, model, query_prefix=""):
+              contexts = []
+              candidate_texts = []
+              seen_contexts = set()
+              seen_candidates = set()
+              for e in examples:
+                  query = query_prefix + e.context
+                  if query not in seen_contexts:
+                      seen_contexts.add(query)
+                      contexts.append(query)
+                  for c in e.candidates:
+                      if c not in seen_candidates:
+                          seen_candidates.add(c)
+                          candidate_texts.append(c)
+
+              context_embeddings = model.encode(
+                  contexts,
+                  batch_size=8,
+                  convert_to_tensor=True,
+                  normalize_embeddings=True,
+                  show_progress_bar=False,
+              ).cpu()
+              candidate_embeddings = model.encode(
+                  candidate_texts,
+                  batch_size=8,
+                  convert_to_tensor=True,
+                  normalize_embeddings=True,
+                  show_progress_bar=False,
+              ).cpu()
+              c_map = {text: emb for text, emb in zip(contexts, context_embeddings)}
+              a_map = {text: emb for text, emb in zip(candidate_texts, candidate_embeddings)}
+
+              preds = []
+              for e in examples:
+                  query = query_prefix + e.context
+                  q = c_map[query]
+                  matrix = torch.stack([a_map[c] for c in e.candidates])
+                  preds.append(int(torch.mv(matrix, q).argmax()))
+              return preds
+
+          report = {
+              "candidate_count": K,
+              "max_length": MAX_LENGTH,
+              "examples": len(full),
+              "random_expected": 1.0 / K,
+              "models": {},
+          }
+
+          unix = UniXcoderEncoder(frozen=True, max_length=MAX_LENGTH)
+          report["models"]["unixcoder-base"] = {}
+          for mode, examples in modes.items():
+              report["models"]["unixcoder-base"][mode] = score(
+                  examples,
+                  unix_predictions(examples, unix),
+              )
+          del unix
+          gc.collect()
+
+          configs = [
+              (
+                  "codesage-small-v2",
+                  "codesage/codesage-small-v2",
+                  "",
+              ),
+              (
+                  "jina-embeddings-v2-base-code",
+                  "jinaai/jina-embeddings-v2-base-code",
+                  "",
+              ),
+              (
+                  "CodeRankEmbed",
+                  "nomic-ai/CodeRankEmbed",
+                  "Represent this query for searching relevant code: ",
+              ),
+          ]
+
+          for short_name, model_name, prefix in configs:
+              model = SentenceTransformer(
+                  model_name,
+                  trust_remote_code=True,
+                  device="cpu",
+              )
+              model.max_seq_length = MAX_LENGTH
+              report["models"][short_name] = {}
+              for mode, examples in modes.items():
+                  preds = st_predictions(examples, model, query_prefix=prefix)
+                  report["models"][short_name][mode] = score(examples, preds)
+              del model
+              gc.collect()
+
+          print("ENCODER_BAKEOFF_JSON=" + json.dumps(report, sort_keys=True))
+          PY
