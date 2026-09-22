@@ -1,0 +1,96 @@
+name: click-structural-baselines
+
+on:
+  push:
+    branches: ["analysis/click-structural-baselines"]
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install -e . --no-deps
+      - run: git clone --depth 1 https://github.com/pallets/click.git /tmp/click
+      - name: Structural baselines
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from statistics import mean
+
+          from cdm.repository import repository_masked_call_examples, split_repository_examples
+
+          TOKEN = re.compile(r"[A-Za-z_][A-Za-z_0-9]*|\d+")
+
+          def tokens(text):
+              stop = {"def","return","if","else","for","in","and","or","not","the","a","an","to","of","is","this","file","call_target"}
+              return {t.lower() for t in TOKEN.findall(text) if len(t) > 1 and t.lower() not in stop}
+
+          def source(candidate):
+              return candidate.split("::", 1)[0]
+
+          def signature(candidate):
+              return candidate.split("::", 1)[1].split("\n", 1)[0]
+
+          def arity(candidate):
+              sig = signature(candidate)
+              inside = sig.split("(",1)[1].rsplit(")",1)[0].strip()
+              if not inside:
+                  return 0
+              return sum(1 for p in inside.split(",") if not p.strip().startswith("*"))
+
+          def call_arity(context):
+              # The masked AST is normalized by ast.unparse, so this intentionally simple
+              # parser is enough for a diagnostic baseline.
+              import ast
+              code = context.split("\n\n",1)[1]
+              tree = ast.parse(code)
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "__CALL_TARGET__":
+                      return len(node.args)
+              return None
+
+          examples = repository_masked_call_examples("/tmp/click", max_candidates=16, candidate_body_chars=512, seed=0)
+          split = split_repository_examples(examples, seed=0)
+          test = split.test
+
+          same_file_correct = 0
+          same_file_lex_correct = 0
+          same_file_arity_correct = 0
+          local_counts = []
+
+          for e in test:
+              local = [i for i,c in enumerate(e.candidates) if source(c) == e.source]
+              local_counts.append(len(local))
+
+              pred = local[0]
+              same_file_correct += pred == e.answer_index
+
+              ctok = tokens(e.context)
+              pred_lex = max(local, key=lambda i: len(ctok & tokens(e.candidates[i])) / max(1, len(ctok | tokens(e.candidates[i]))))
+              same_file_lex_correct += pred_lex == e.answer_index
+
+              n_args = call_arity(e.context)
+              matching = [i for i in local if arity(e.candidates[i]) == n_args]
+              pred_arity = (matching or local)[0]
+              same_file_arity_correct += pred_arity == e.answer_index
+
+          report = {
+              "test": len(test),
+              "same_file_first": same_file_correct / len(test),
+              "same_file_lexical": same_file_lex_correct / len(test),
+              "same_file_arity_first": same_file_arity_correct / len(test),
+              "same_file_random_expected": mean(1.0/n for n in local_counts),
+              "local_candidate_count_mean": mean(local_counts),
+              "local_candidate_count_min": min(local_counts),
+              "local_candidate_count_max": max(local_counts),
+              "local_candidate_counts": local_counts,
+          }
+          print("STRUCTURAL_JSON=" + json.dumps(report, sort_keys=True))
+          PY
