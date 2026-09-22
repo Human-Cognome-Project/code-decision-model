@@ -40,21 +40,23 @@ class PythonSymbol:
     name: str
     signature: str
     body: str
+    positional_arity: int
+    keyword_only_arity: int
+    has_vararg: bool
+    has_kwarg: bool
 
     @property
     def candidate(self) -> str:
         return f"{self.source}::{self.signature}"
 
     @property
-    def positional_arity(self) -> int:
-        """Number of named positional parameters represented in the signature."""
-        inside = self.signature.split("(", 1)[1].rsplit(")", 1)[0].strip()
-        if not inside:
-            return 0
-        return sum(
-            1
-            for part in inside.split(",")
-            if part.strip() and not part.strip().startswith("*")
+    def call_shape(self) -> tuple[int, int, bool, bool]:
+        """Structural parameter shape used to control easy candidate shortcuts."""
+        return (
+            self.positional_arity,
+            self.keyword_only_arity,
+            self.has_vararg,
+            self.has_kwarg,
         )
 
 
@@ -98,12 +100,38 @@ def iter_python_files(
 
 
 def _signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-    args = [arg.arg for arg in node.args.args]
+    """Render parameter names while preserving Python's parameter categories."""
+    parts: list[str] = []
+
+    if node.args.posonlyargs:
+        parts.extend(arg.arg for arg in node.args.posonlyargs)
+        parts.append("/")
+
+    parts.extend(arg.arg for arg in node.args.args)
+
     if node.args.vararg is not None:
-        args.append("*" + node.args.vararg.arg)
+        parts.append("*" + node.args.vararg.arg)
+    elif node.args.kwonlyargs:
+        parts.append("*")
+
+    parts.extend(arg.arg for arg in node.args.kwonlyargs)
+
     if node.args.kwarg is not None:
-        args.append("**" + node.args.kwarg.arg)
-    return f"{node.name}({', '.join(args)})"
+        parts.append("**" + node.args.kwarg.arg)
+
+    return f"{node.name}({', '.join(parts)})"
+
+
+def _call_shape(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[int, int, bool, bool]:
+    """Return positional count, keyword-only count, *args, and **kwargs flags."""
+    return (
+        len(node.args.posonlyargs) + len(node.args.args),
+        len(node.args.kwonlyargs),
+        node.args.vararg is not None,
+        node.args.kwarg is not None,
+    )
 
 
 def _parse_file(root: Path, rel: Path, *, strict: bool) -> tuple[list[PythonSymbol], ast.Module] | None:
@@ -120,12 +148,17 @@ def _parse_file(root: Path, rel: Path, *, strict: bool) -> tuple[list[PythonSymb
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             body = ast.get_source_segment(source, node) or node.name
+            positional, keyword_only, has_vararg, has_kwarg = _call_shape(node)
             symbols.append(
                 PythonSymbol(
                     source=rel.as_posix(),
                     name=node.name,
                     signature=_signature(node),
                     body=body,
+                    positional_arity=positional,
+                    keyword_only_arity=keyword_only,
+                    has_vararg=has_vararg,
+                    has_kwarg=has_kwarg,
                 )
             )
     return symbols, tree
@@ -478,7 +511,7 @@ def repository_hard_masked_call_examples(
                 symbol
                 for symbol in local_symbols
                 if symbol != caller
-                and symbol.positional_arity == target.positional_arity
+                and symbol.call_shape == target.call_shape
             ]
             if target not in pool or len(pool) < candidate_count:
                 continue
