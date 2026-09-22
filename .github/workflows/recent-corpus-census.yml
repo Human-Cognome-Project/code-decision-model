@@ -1,0 +1,57 @@
+name: recent-corpus-census
+
+on:
+  push:
+    branches: ["analysis/recent-corpus-census"]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project
+        run: python -m pip install -e . --no-deps
+      - name: Clone post-2024 repositories
+        run: |
+          mkdir -p /tmp/recent
+          git clone --depth 1 https://github.com/microsoft/markitdown.git /tmp/recent/markitdown
+          git clone --depth 1 https://github.com/browser-use/browser-use.git /tmp/recent/browser-use
+          git clone --depth 1 https://github.com/unclecode/crawl4ai.git /tmp/recent/crawl4ai
+          git clone --depth 1 https://github.com/D4Vinci/Scrapling.git /tmp/recent/scrapling
+      - name: Measure hardened examples
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from cdm.repository import repository_hard_masked_call_examples
+
+          roots = {
+              "markitdown": Path("/tmp/recent/markitdown"),
+              "browser-use": Path("/tmp/recent/browser-use"),
+              "crawl4ai": Path("/tmp/recent/crawl4ai"),
+              "scrapling": Path("/tmp/recent/scrapling"),
+          }
+          report = {}
+          for name, root in roots.items():
+              report[name] = {}
+              for k in (4, 8):
+                  examples = repository_hard_masked_call_examples(
+                      root,
+                      candidate_count=k,
+                      candidate_body_chars=512,
+                      seed=0,
+                  )
+                  report[name][str(k)] = {
+                      "examples": len(examples),
+                      "sources": len({e.source for e in examples}),
+                      "answer_positions": sorted({e.answer_index for e in examples}),
+                  }
+          print("RECENT_CENSUS_JSON=" + json.dumps(report, sort_keys=True))
+          PY
