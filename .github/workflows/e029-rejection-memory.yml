@@ -359,10 +359,14 @@ jobs:
                   f"frozen success drift for {HELDOUT}: {frozen_success} "
                   f"!= {EXPECTED[HELDOUT]['frozen_success']}"
               )
-          if dict(frozen_second) != EXPECTED[HELDOUT]["frozen_second"]:
+          frozen_second_full = {
+              key: frozen_second[key]
+              for key in ("correct", "repeat", "other_wrong", "invalid")
+          }
+          if frozen_second_full != EXPECTED[HELDOUT]["frozen_second"]:
               raise RuntimeError(
                   f"frozen correction drift for {HELDOUT}: "
-                  f"{dict(frozen_second)!r} != {EXPECTED[HELDOUT]['frozen_second']!r}"
+                  f"{frozen_second_full!r} != {EXPECTED[HELDOUT]['frozen_second']!r}"
               )
 
           wrong = [r for r in records if not r["recommendation_correct"]]
