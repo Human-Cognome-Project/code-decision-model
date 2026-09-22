@@ -98,9 +98,9 @@ The 12-task live pilot improved first-pass success from 2/12 to 7/12 and success
 within two attempts from 5/12 to 8/12. This is a promising pilot and requires a
 larger confirmatory held-out run.
 
-## E025 — Paired corrective-turn statistics
+## E026 — Paired corrective-turn statistics
 
-See [E025_PAIRED_STATISTICS.md](E025_PAIRED_STATISTICS.md).
+See [E026_PAIRED_STATISTICS.md](E026_PAIRED_STATISTICS.md).
 
 Reproducible aggregation of paired baseline/assisted outcomes from either
 corrective-turn harness, with exact McNemar and sign tests and a source-clustered
