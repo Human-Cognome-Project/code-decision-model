@@ -23,6 +23,18 @@ from .repair import (
     verify_repair,
 )
 from .binding import CallShape, CallSiteBindable, Parameters
+from .corrective import (
+    ArmSummary,
+    ExactTest,
+    PairedCorrectiveSummary,
+    PairedInterval,
+    cluster_bootstrap_paired,
+    exact_mcnemar,
+    exact_sign_test,
+    render_report,
+    summarize_paired,
+    summarize_paired_by,
+)
 from .constraints import (
     AllAllowed,
     ConstrainedDecision,
@@ -52,6 +64,16 @@ __all__ = [
     "run_paired_repair",
     "run_repair_loop",
     "verify_repair",
+    "ArmSummary",
+    "ExactTest",
+    "PairedCorrectiveSummary",
+    "PairedInterval",
+    "cluster_bootstrap_paired",
+    "exact_mcnemar",
+    "exact_sign_test",
+    "render_report",
+    "summarize_paired",
+    "summarize_paired_by",
     "CallShape",
     "CallSiteBindable",
     "Parameters",
