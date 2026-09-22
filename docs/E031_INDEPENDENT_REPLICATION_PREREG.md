@@ -113,6 +113,10 @@ change is permitted after extraction counts are seen.
 
 Run leave-one-repository-out rotation across the four selected E031 repositories.
 
+Repository examples are concatenated in their **frozen candidate-pool order**
+before each fold's train/test filtering. Extractor output order remains the
+existing deterministic source/caller order.
+
 For each fold:
 
 - the held-out repository contributes only test examples;
@@ -152,6 +156,7 @@ Use the E026 paired analysis unchanged:
 - source-file clustered bootstrap;
 - bootstrap resampling within held-out-repository strata;
 - 5,000 bootstrap replicates;
+- bootstrap RNG seed: **27027** (matching the E027 aggregate workflow);
 - report the 95% interval for the pooled success-rate delta.
 
 Secondary descriptive measures:
