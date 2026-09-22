@@ -152,6 +152,13 @@ See [E028_FAILURE_CONDITIONED_ANALYSIS.md](E028_FAILURE_CONDITIONED_ANALYSIS.md)
 
 Adds an analysis-only decomposition of remaining assisted failures into machine-counted mechanisms: wrong recommendations, ignored correct recommendations, failure to recover after deterministic feedback, and structured-output parse failures. It changes none of the frozen E027 protocol.
 
+
+### E028 live result
+
+See [E028_FAILURE_CONDITIONED_RESULT.md](E028_FAILURE_CONDITIONED_RESULT.md).
+
+The preserved E027 task records show that the assisted generator followed the decision recommendation on 400/400 first attempts. Correct recommendations solved 236/236 tasks immediately; all 111 assisted terminal failures occurred after wrong recommendations. On the 164 wrong-recommendation tasks, success within two attempts was 80/164 baseline vs 53/164 assisted, with 20 second turns repeating the already-rejected recommendation. This motivates E029: deterministic rejection memory that removes a verifier-rejected candidate from the next-turn choice set.
+
 ## E030 — Import-resolved cross-file call supervision
 
 See [E030_CROSS_FILE_CALLS.md](E030_CROSS_FILE_CALLS.md).
