@@ -144,3 +144,10 @@ and the repository-stratified source-file bootstrap 95% interval was +14.37 to
 The next gate is development-independent replication on a second pinned repository
 set. Current exploratory directions are tracked in
 [OPEN_DIRECTIONS.md](OPEN_DIRECTIONS.md).
+
+
+## E028 — Failure-conditioned structured-selection analysis
+
+See [E028_FAILURE_CONDITIONED_ANALYSIS.md](E028_FAILURE_CONDITIONED_ANALYSIS.md).
+
+Adds an analysis-only decomposition of remaining assisted failures into machine-counted mechanisms: wrong recommendations, ignored correct recommendations, failure to recover after deterministic feedback, and structured-output parse failures. It changes none of the frozen E027 protocol.
