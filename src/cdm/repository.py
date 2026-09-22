@@ -45,6 +45,18 @@ class PythonSymbol:
     def candidate(self) -> str:
         return f"{self.source}::{self.signature}"
 
+    @property
+    def positional_arity(self) -> int:
+        """Number of named positional parameters represented in the signature."""
+        inside = self.signature.split("(", 1)[1].rsplit(")", 1)[0].strip()
+        if not inside:
+            return 0
+        return sum(
+            1
+            for part in inside.split(",")
+            if part.strip() and not part.strip().startswith("*")
+        )
+
 
 @dataclass(frozen=True)
 class RepositoryDataset:
@@ -407,6 +419,98 @@ def repository_masked_call_examples(
                     candidates=candidates,
                     answer_index=answer_index,
                     task="python.masked_direct_call",
+                    source=source_name,
+                )
+            )
+
+    return examples
+
+
+def repository_hard_masked_call_examples(
+    root: str | Path,
+    *,
+    candidate_count: int = 4,
+    candidate_body_chars: int = 768,
+    seed: int = 0,
+    strict: bool = False,
+) -> list[DecisionExample]:
+    """Create a harder masked-call task with structural shortcuts controlled.
+
+    Every candidate:
+    - comes from the caller's source file;
+    - has the same positional arity as the true target;
+    - is not the caller itself.
+
+    File paths are omitted from both context and candidate text because they carry no
+    useful semantic information once the pool is local. Examples that cannot provide
+    the full fixed candidate count are skipped.
+    """
+    if candidate_count < 2:
+        raise ValueError("candidate_count must be at least 2")
+
+    root_path = Path(root).resolve()
+    _, by_file = collect_python_symbols(root_path, strict=strict)
+    examples: list[DecisionExample] = []
+
+    for source_name, local_symbols in sorted(by_file.items()):
+        path = root_path / source_name
+        try:
+            source_text = path.read_text(encoding="utf-8")
+            targets = _direct_local_target_names(source_text, local_symbols)
+        except (OSError, UnicodeError, SyntaxError):
+            if strict:
+                raise
+            continue
+
+        by_name = {symbol.name: symbol for symbol in local_symbols}
+        for caller_name, target_name in sorted(targets.items()):
+            caller = by_name[caller_name]
+            target = by_name[target_name]
+            masked_body = _masked_function_body(
+                source_text,
+                caller_name=caller_name,
+                target_name=target_name,
+            )
+            if masked_body is None:
+                continue
+
+            pool = [
+                symbol
+                for symbol in local_symbols
+                if symbol != caller
+                and symbol.positional_arity == target.positional_arity
+            ]
+            if target not in pool or len(pool) < candidate_count:
+                continue
+
+            rng = _stable_rng(
+                seed,
+                "hard-masked",
+                source_name,
+                caller_name,
+                target.candidate,
+            )
+            negatives = [symbol for symbol in pool if symbol != target]
+            rng.shuffle(negatives)
+            chosen = [target, *negatives[: candidate_count - 1]]
+            rng.shuffle(chosen)
+
+            candidates = tuple(
+                f"{symbol.signature}\n{symbol.body[:candidate_body_chars]}"
+                for symbol in chosen
+            )
+            answer_index = chosen.index(target)
+
+            examples.append(
+                DecisionExample(
+                    context=masked_body,
+                    question=(
+                        "Which candidate definition should replace "
+                        "__CALL_TARGET__ in this caller?"
+                    ),
+                    candidates=candidates,
+                    answer_index=answer_index,
+                    task="python.hard_masked_direct_call",
                     source=source_name,
                 )
             )
