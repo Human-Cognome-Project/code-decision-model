@@ -70,3 +70,15 @@ decision intervention, and strict structured-output parser.
 - Full-function generation (E022 already measured that floor).
 - Soft confidence routing (E020 negative).
 - Expanding the decision head before this narrower causal question is answered.
+
+
+## Confirmatory follow-up
+
+E025 repeats this protocol on the full 63-example held-out split.
+
+See [E025_CONFIRMATORY_STRUCTURED_EDIT.md](E025_CONFIRMATORY_STRUCTURED_EDIT.md).
+
+The confirmatory run increased success within two attempts from 50.8% to 69.8%,
+with exact McNemar p = 0.0428 and a repository-stratified source-file bootstrap
+95% interval of +2.7 to +32.8 percentage points for the paired success-rate
+delta.

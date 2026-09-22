@@ -106,3 +106,16 @@ Reproducible aggregation of paired baseline/assisted outcomes from either
 corrective-turn harness, with exact McNemar and sign tests and a source-clustered
 bootstrap. Applied to the E023 pilot it gives p = 0.375 and p = 0.5, and sizes
 the confirmatory run at roughly 30 to 60 held-out tasks depending on effect size.
+
+
+## E025 — Full held-out structured-edit confirmation
+
+See [E025_CONFIRMATORY_STRUCTURED_EDIT.md](E025_CONFIRMATORY_STRUCTURED_EDIT.md).
+
+On the full 63-example held-out split, structured decision assistance increased
+success within two attempts from 32/63 (50.8%) to 44/63 (69.8%). The paired
+success-rate delta was +19.0 percentage points; exact McNemar p = 0.0428 and the
+repository-stratified source-file bootstrap 95% interval was +2.7 to +32.8 points.
+
+This confirms the E023 pilot on the current same-repository held-out split. The
+next gate is unseen-repository replication.
