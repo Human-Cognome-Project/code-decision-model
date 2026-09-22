@@ -12,6 +12,7 @@ from typing import Sequence
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 
 @dataclass(frozen=True)
@@ -22,21 +23,106 @@ class EncodedDecisionContext:
     question: torch.Tensor
 
 
-class CodeDecisionModel(nn.Module):
-    """Score arbitrary runtime-defined candidates against code context and a question."""
+class PairwiseMLPScorer(nn.Module):
+    """Original expressive scorer over pairwise context/question/candidate features."""
 
-    def __init__(self, encoder: nn.Module, dim: int, hidden: int = 256) -> None:
+    def __init__(self, dim: int, hidden: int = 256) -> None:
         super().__init__()
-        self.encoder = encoder
-        self.dim = dim
-        # Pairwise features make the scorer sensitive to both alignment and mismatch.
         feature_dim = dim * 7
-        self.scorer = nn.Sequential(
+        self.network = nn.Sequential(
             nn.LayerNorm(feature_dim),
             nn.Linear(feature_dim, hidden),
             nn.GELU(),
             nn.Linear(hidden, 1),
         )
+
+    def forward(
+        self,
+        context: torch.Tensor,
+        question: torch.Tensor,
+        candidates: torch.Tensor,
+    ) -> torch.Tensor:
+        c = context.expand(candidates.shape[0], -1)
+        q = question.expand(candidates.shape[0], -1)
+        a = candidates
+        features = torch.cat(
+            [
+                c,
+                q,
+                a,
+                c * a,
+                q * a,
+                torch.abs(c - a),
+                torch.abs(q - a),
+            ],
+            dim=-1,
+        )
+        return self.network(features).squeeze(-1)
+
+
+class CosineMixScorer(nn.Module):
+    """Two-parameter regularized scorer over frozen representation geometry.
+
+    The scorer learns only:
+    - how much to weight context-vs-candidate cosine relative to
+      question-vs-candidate cosine;
+    - a shared positive logit scale.
+
+    A candidate-independent bias would cancel under softmax, so none is included.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mix_logit = nn.Parameter(torch.tensor(0.0))
+        self.log_scale = nn.Parameter(torch.tensor(0.0))
+
+    def forward(
+        self,
+        context: torch.Tensor,
+        question: torch.Tensor,
+        candidates: torch.Tensor,
+    ) -> torch.Tensor:
+        context_scores = F.cosine_similarity(
+            candidates,
+            context.expand_as(candidates),
+            dim=-1,
+        )
+        question_scores = F.cosine_similarity(
+            candidates,
+            question.expand_as(candidates),
+            dim=-1,
+        )
+        mix = torch.sigmoid(self.mix_logit)
+        scale = torch.exp(torch.clamp(self.log_scale, min=-5.0, max=5.0))
+        return scale * (
+            mix * context_scores
+            + (1.0 - mix) * question_scores
+        )
+
+    @property
+    def context_weight(self) -> torch.Tensor:
+        return torch.sigmoid(self.mix_logit)
+
+    @property
+    def scale(self) -> torch.Tensor:
+        return torch.exp(torch.clamp(self.log_scale, min=-5.0, max=5.0))
+
+
+class CodeDecisionModel(nn.Module):
+    """Score arbitrary runtime-defined candidates against code context and a question."""
+
+    def __init__(
+        self,
+        encoder: nn.Module,
+        dim: int,
+        hidden: int = 256,
+        *,
+        scorer: nn.Module | None = None,
+    ) -> None:
+        super().__init__()
+        self.encoder = encoder
+        self.dim = dim
+        self.scorer = scorer if scorer is not None else PairwiseMLPScorer(dim, hidden)
 
     def encode_texts(
         self,
@@ -79,22 +165,11 @@ class CodeDecisionModel(nn.Module):
         decision_context: EncodedDecisionContext,
         candidate_embeddings: torch.Tensor,
     ) -> torch.Tensor:
-        c = decision_context.context.expand(candidate_embeddings.shape[0], -1)
-        q = decision_context.question.expand(candidate_embeddings.shape[0], -1)
-        a = candidate_embeddings
-        features = torch.cat(
-            [
-                c,
-                q,
-                a,
-                c * a,
-                q * a,
-                torch.abs(c - a),
-                torch.abs(q - a),
-            ],
-            dim=-1,
+        return self.scorer(
+            decision_context.context,
+            decision_context.question,
+            candidate_embeddings,
         )
-        return self.scorer(features).squeeze(-1)
 
     def forward(self, code_context: str, question: str, candidates: Sequence[str]) -> torch.Tensor:
         dc = self.encode_context(code_context, question)
