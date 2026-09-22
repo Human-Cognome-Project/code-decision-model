@@ -1,0 +1,173 @@
+name: recent-identifier-ablation
+
+on:
+  push:
+    branches: ["analysis/recent-identifier-ablation"]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: unixcoder-base-v4-${{ runner.os }}-py312-ablation-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project with encoder dependencies
+        run: python -m pip install -e ".[hf]"
+      - name: Clone exact benchmark revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"
+            sha="$2"
+            dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/recent
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/recent/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/recent/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/recent/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/recent/scrapling
+      - name: Measure identifier contribution
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from collections import defaultdict
+
+          import torch
+          from torch.nn import functional as F
+
+          from cdm import CodeDecisionModel, UniXcoderEncoder
+          from cdm.ablation import ablate_hard_call_identifiers
+          from cdm.repository import repository_hard_masked_call_examples
+          from cdm.training import preencode_examples
+
+          REPOS = {
+              "browser-use": "/tmp/recent/browser-use",
+              "crawl4ai": "/tmp/recent/crawl4ai",
+              "markitdown": "/tmp/recent/markitdown",
+              "scrapling": "/tmp/recent/scrapling",
+          }
+          TOKEN = re.compile(r"[A-Za-z_][A-Za-z_0-9]*|\d+")
+          K = 4
+
+          def token_set(text):
+              stop = {
+                  "def", "async", "return", "if", "else", "for", "in", "and", "or",
+                  "not", "the", "a", "an", "to", "of", "is", "this", "call_target",
+                  "caller", "candidate", "none", "true", "false",
+              }
+              return {
+                  t.lower() for t in TOKEN.findall(text)
+                  if len(t) > 1 and t.lower() not in stop
+              }
+
+          def lexical_predictions(examples):
+              preds = []
+              for example in examples:
+                  ctx = token_set(example.context)
+                  scores = []
+                  for candidate in example.candidates:
+                      cand = token_set(candidate)
+                      union = ctx | cand
+                      scores.append(len(ctx & cand) / max(1, len(union)))
+                  preds.append(max(range(len(scores)), key=scores.__getitem__))
+              return preds
+
+          @torch.no_grad()
+          def cosine_predictions(encoded):
+              preds = []
+              for item in encoded:
+                  context = F.normalize(item.decision_context.context.float(), dim=0)
+                  candidates = F.normalize(item.candidate_embeddings.float(), dim=1)
+                  preds.append(int(torch.mv(candidates, context).argmax()))
+              return preds
+
+          def score(examples, preds):
+              total = sum(int(p == e.answer_index) for e, p in zip(examples, preds))
+              buckets = defaultdict(lambda: [0, 0])
+              for example, pred in zip(examples, preds):
+                  repo = example.source.split("::", 1)[0]
+                  buckets[repo][0] += int(pred == example.answer_index)
+                  buckets[repo][1] += 1
+              return {
+                  "accuracy": total / len(examples),
+                  "correct": total,
+                  "count": len(examples),
+                  "by_repo": {
+                      k: {
+                          "accuracy": v[0] / v[1],
+                          "correct": v[0],
+                          "count": v[1],
+                      }
+                      for k, v in sorted(buckets.items())
+                  },
+              }
+
+          full = []
+          for name, root in REPOS.items():
+              examples = repository_hard_masked_call_examples(
+                  root,
+                  candidate_count=K,
+                  candidate_body_chars=512,
+                  seed=0,
+              )
+              for example in examples:
+                  full.append(type(example)(
+                      context=example.context,
+                      question=example.question,
+                      candidates=example.candidates,
+                      answer_index=example.answer_index,
+                      task=example.task,
+                      source=f"{name}::{example.source}",
+                  ))
+
+          modes = {
+              "full": full,
+              "caller_masked": [
+                  ablate_hard_call_identifiers(e, caller=True, candidates=False)
+                  for e in full
+              ],
+              "candidate_names_masked": [
+                  ablate_hard_call_identifiers(e, caller=False, candidates=True)
+                  for e in full
+              ],
+              "both_masked": [
+                  ablate_hard_call_identifiers(e, caller=True, candidates=True)
+                  for e in full
+              ],
+          }
+
+          encoder = UniXcoderEncoder(frozen=True, max_length=512)
+          shell = CodeDecisionModel(encoder=encoder, dim=encoder.dim, hidden=32)
+
+          report = {
+              "candidate_count": K,
+              "random_expected": 1.0 / K,
+              "examples": len(full),
+              "modes": {},
+          }
+
+          for mode, examples in modes.items():
+              lexical = lexical_predictions(examples)
+              encoded = preencode_examples(shell, examples, batch_size=8)
+              cosine = cosine_predictions(encoded)
+              report["modes"][mode] = {
+                  "lexical": score(examples, lexical),
+                  "unixcoder_cosine": score(examples, cosine),
+              }
+
+          print("IDENTIFIER_ABLATION_JSON=" + json.dumps(report, sort_keys=True))
+          PY
