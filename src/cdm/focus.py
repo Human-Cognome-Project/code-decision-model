@@ -1,6 +1,7 @@
 """Context focusing transforms for code-decision experiments."""
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import replace
 
@@ -15,8 +16,9 @@ def focus_hard_call_context(
     *,
     radius_lines: int = 8,
     marker: str = "__CALL_TARGET__",
+    compact_header: bool = False,
 ) -> DecisionExample:
-    """Keep the function header and a local line window around the masked call site.
+    """Keep a function header and a local line window around the masked call site.
 
     This transform is intended for hard masked-call examples. It never changes the
     candidate set or answer. Short contexts are returned unchanged.
@@ -42,11 +44,34 @@ def focus_hard_call_context(
     start = max(header + 1, first_marker - radius_lines)
     end = min(len(lines), last_marker + radius_lines + 1)
 
-    # If the requested window already covers the complete function, keep exact text.
-    if start == header + 1 and end == len(lines) and header == 0:
+    # If the requested window already covers the complete function, keep exact text
+    # unless the caller explicitly asked to compact the header.
+    if (
+        not compact_header
+        and start == header + 1
+        and end == len(lines)
+        and header == 0
+    ):
         return example
 
-    prefix = lines[: header + 1]
+    if compact_header:
+        tree = ast.parse(example.context)
+        outer = next(
+            (
+                node
+                for node in tree.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            ),
+            None,
+        )
+        if outer is None:
+            raise ValueError("function definition header not found")
+        prefix = [
+            ("async def " if isinstance(outer, ast.AsyncFunctionDef) else "def ")
+            + f"{outer.name}(...):"
+        ]
+    else:
+        prefix = lines[: header + 1]
     indent_match = re.match(r"^(\s*)", lines[first_marker])
     body_indent = indent_match.group(1) if indent_match else "    "
     if not body_indent:
