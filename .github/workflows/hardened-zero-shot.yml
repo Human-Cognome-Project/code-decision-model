@@ -1,0 +1,183 @@
+name: hardened-zero-shot
+
+on:
+  push:
+    branches: ["analysis/hardened-zero-shot"]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: unixcoder-base-v4-${{ runner.os }}-py312-zero-shot-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project with encoder dependencies
+        run: python -m pip install -e ".[hf]"
+      - name: Clone repositories
+        run: |
+          mkdir -p /tmp/bench
+          git clone --depth 1 https://github.com/pallets/click.git /tmp/bench/click
+          git clone --depth 1 https://github.com/encode/httpx.git /tmp/bench/httpx
+          git clone --depth 1 https://github.com/fastapi/fastapi.git /tmp/bench/fastapi
+          git clone --depth 1 https://github.com/pydantic/pydantic.git /tmp/bench/pydantic
+          git clone --depth 1 https://github.com/psf/requests.git /tmp/bench/requests
+      - name: Evaluate zero-shot representation geometry
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from collections import Counter
+
+          import torch
+          from torch.nn import functional as F
+
+          from cdm import CodeDecisionModel, HashTextEncoder, UniXcoderEncoder
+          from cdm.repository import repository_hard_masked_call_examples
+          from cdm.training import preencode_examples
+
+          REPOS = {
+              "click": "/tmp/bench/click",
+              "httpx": "/tmp/bench/httpx",
+              "fastapi": "/tmp/bench/fastapi",
+              "pydantic": "/tmp/bench/pydantic",
+              "requests": "/tmp/bench/requests",
+          }
+          K = 8
+          BODY_CHARS = 512
+          MAX_LENGTH = 512
+          TOKEN = re.compile(r"[A-Za-z_][A-Za-z_0-9]*|\d+")
+
+          def token_set(text):
+              stop = {
+                  "def", "async", "return", "if", "else", "for", "in", "and", "or",
+                  "not", "the", "a", "an", "to", "of", "is", "this", "call_target",
+                  "none", "true", "false",
+              }
+              return {
+                  t.lower() for t in TOKEN.findall(text)
+                  if len(t) > 1 and t.lower() not in stop
+              }
+
+          def lexical_predictions(examples, signature_only=False):
+              preds = []
+              for example in examples:
+                  ctx = token_set(example.context)
+                  scores = []
+                  for candidate in example.candidates:
+                      text = candidate.split("\n", 1)[0] if signature_only else candidate
+                      cand = token_set(text)
+                      union = ctx | cand
+                      scores.append(len(ctx & cand) / max(1, len(union)))
+                  preds.append(max(range(len(scores)), key=scores.__getitem__))
+              return preds
+
+          @torch.no_grad()
+          def cosine_predictions(encoded):
+              preds = []
+              for item in encoded:
+                  context = F.normalize(item.decision_context.context.float(), dim=0)
+                  candidates = F.normalize(item.candidate_embeddings.float(), dim=1)
+                  preds.append(int(torch.mv(candidates, context).argmax()))
+              return preds
+
+          def accuracy(examples, preds):
+              return sum(
+                  int(pred == example.answer_index)
+                  for example, pred in zip(examples, preds)
+              ) / len(examples)
+
+          report = {}
+          aggregate_examples = []
+          aggregate_lex_full = []
+          aggregate_lex_sig = []
+          aggregate_hash = []
+          aggregate_unix = []
+
+          # Fixed random lexical-projection baseline.
+          torch.manual_seed(12345)
+          hash_encoder = HashTextEncoder(dim=128, buckets=32768)
+          for p in hash_encoder.parameters():
+              p.requires_grad_(False)
+          hash_encoder.eval()
+          hash_shell = CodeDecisionModel(hash_encoder, dim=128, hidden=32)
+
+          unix_encoder = UniXcoderEncoder(frozen=True, max_length=MAX_LENGTH)
+          unix_shell = CodeDecisionModel(unix_encoder, dim=unix_encoder.dim, hidden=32)
+
+          for name, root in REPOS.items():
+              examples = repository_hard_masked_call_examples(
+                  root,
+                  candidate_count=K,
+                  candidate_body_chars=BODY_CHARS,
+                  seed=0,
+              )
+              if not examples:
+                  report[name] = {"examples": 0}
+                  continue
+
+              lex_full = lexical_predictions(examples, False)
+              lex_sig = lexical_predictions(examples, True)
+
+              hash_encoded = preencode_examples(hash_shell, examples, batch_size=64)
+              hash_preds = cosine_predictions(hash_encoded)
+
+              marker_positions = [
+                  len(unix_encoder.tokenizer.tokenize(
+                      e.context.split("__CALL_TARGET__", 1)[0]
+                  ))
+                  for e in examples
+              ]
+              unix_encoded = preencode_examples(unix_shell, examples, batch_size=8)
+              unix_preds = cosine_predictions(unix_encoded)
+
+              answer_counts = Counter(e.answer_index for e in examples)
+              report[name] = {
+                  "examples": len(examples),
+                  "source_files": len({e.source for e in examples}),
+                  "random_expected": 1.0 / K,
+                  "majority_answer_position": max(answer_counts.values()) / len(examples),
+                  "lexical_full": accuracy(examples, lex_full),
+                  "lexical_signature": accuracy(examples, lex_sig),
+                  "hash_cosine": accuracy(examples, hash_preds),
+                  "unixcoder_cosine": accuracy(examples, unix_preds),
+                  "unixcoder_correct": sum(
+                      int(p == e.answer_index) for e, p in zip(examples, unix_preds)
+                  ),
+                  "marker_truncated": sum(pos >= MAX_LENGTH - 4 for pos in marker_positions),
+                  "marker_position_max": max(marker_positions),
+              }
+
+              aggregate_examples.extend(examples)
+              aggregate_lex_full.extend(lex_full)
+              aggregate_lex_sig.extend(lex_sig)
+              aggregate_hash.extend(hash_preds)
+              aggregate_unix.extend(unix_preds)
+
+          if aggregate_examples:
+              answer_counts = Counter(e.answer_index for e in aggregate_examples)
+              report["aggregate"] = {
+                  "examples": len(aggregate_examples),
+                  "random_expected": 1.0 / K,
+                  "majority_answer_position": max(answer_counts.values()) / len(aggregate_examples),
+                  "lexical_full": accuracy(aggregate_examples, aggregate_lex_full),
+                  "lexical_signature": accuracy(aggregate_examples, aggregate_lex_sig),
+                  "hash_cosine": accuracy(aggregate_examples, aggregate_hash),
+                  "unixcoder_cosine": accuracy(aggregate_examples, aggregate_unix),
+                  "unixcoder_correct": sum(
+                      int(p == e.answer_index)
+                      for e, p in zip(aggregate_examples, aggregate_unix)
+                  ),
+              }
+
+          print("HARD_ZERO_SHOT_JSON=" + json.dumps(report, sort_keys=True))
+          PY
