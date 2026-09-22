@@ -96,3 +96,38 @@ def test_multiple_constraints_conjunction():
     assert result.allowed == (True, False, False, False)
     assert result.chosen_index == 0
     assert result.escalate is False
+
+
+def test_no_constraints_preserves_distribution():
+    scores = torch.tensor([0.25, -0.5, 1.5])
+    result = apply_constraints(
+        scores,
+        code_context="ctx",
+        question="q",
+        candidates=("a", "b", "c"),
+        constraints=[],
+    )
+    assert result.allowed == (True, True, True)
+    assert result.escalate is False
+    assert result.chosen_index == 2
+    assert torch.allclose(result.probabilities, torch.softmax(scores, dim=-1))
+
+
+def test_constraint_wrong_candidate_count_is_rejected():
+    class BrokenConstraint:
+        def check(self, code_context, question, candidates):
+            from cdm.constraints import ConstraintResult
+            return ConstraintResult(allowed=(True,))
+
+    try:
+        apply_constraints(
+            torch.tensor([1.0, 2.0]),
+            code_context="ctx",
+            question="q",
+            candidates=("a", "b"),
+            constraints=[BrokenConstraint()],
+        )
+    except ValueError as exc:
+        assert "wrong number" in str(exc)
+    else:
+        raise AssertionError("expected malformed constraint result validation")
