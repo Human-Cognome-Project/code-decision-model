@@ -194,3 +194,18 @@ Preregisters the primary post-E027 validation gate before inspecting extraction 
 See [E031_EXTRACTION_SELECTION.md](E031_EXTRACTION_SELECTION.md).
 
 The preregistered extraction-only census found all eight candidates eligible. The fixed first-four rule therefore selects AlphaFold (26 tasks), Pyodide (53), Optuna (134), and pytest (208): 421 tasks across 108 source files. No scorer or generator result was inspected before this selection was fixed.
+
+## E032 — Ranked feasible re-recommendation
+
+See [E032_RANKED_REJECTION_MEMORY.md](E032_RANKED_REJECTION_MEMORY.md).
+
+Extends E029: after a deterministic rejection, recommend the scorer's next
+feasible candidate instead of nothing, and gate the first recommendation by hard
+constraints. No new model call; the cached ranking is reused. Predicts recovery
+on wrong-recommendation tasks near the scorer's conditional rank-2 accuracy.
+
+Mock:
+
+```bash
+python examples/run_ranked_memory_mock.py
+```

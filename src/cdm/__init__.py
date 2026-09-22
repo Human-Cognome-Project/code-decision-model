@@ -30,6 +30,12 @@ from .rejection_memory import (
     verify_selection_with_memory,
 )
 from .crossfile import repository_hard_masked_cross_file_call_examples
+from .ranked_memory import (
+    RankedMemoryTrace,
+    ranked_recommendation,
+    ranking_from_scores,
+    run_selection_loop_with_ranked_memory,
+)
 from .corrective import (
     ArmSummary,
     ExactTest,
@@ -72,6 +78,10 @@ __all__ = [
     "run_repair_loop",
     "verify_repair",
     "repository_hard_masked_cross_file_call_examples",
+    "RankedMemoryTrace",
+    "ranked_recommendation",
+    "ranking_from_scores",
+    "run_selection_loop_with_ranked_memory",
     "ArmSummary",
     "ExactTest",
     "PairedCorrectiveSummary",
