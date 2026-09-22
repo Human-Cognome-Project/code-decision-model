@@ -17,9 +17,9 @@ _SUPPORTED_TASKS = frozenset({
     "python.hard_masked_same_class_call",
 })
 
-# Accept "3", "candidate 3", "Candidate 3:", etc. First integer in 1..n wins.
+# Accept only a structured selection such as "3", "candidate 3", or "Candidate 3:".
 _INDEX_PATTERN = re.compile(
-    r"(?:candidate\s*)?(\d+)\s*(?:[:.\)]|$)",
+    r"(?:candidate\\s*)?(\\d+)\\s*(?:[:.\\)]?)",
     re.IGNORECASE,
 )
 
@@ -89,7 +89,7 @@ def parse_candidate_index(text: str, n_candidates: int) -> int | None:
         if 1 <= one_based <= n_candidates:
             return one_based - 1
         return None
-    match = _INDEX_PATTERN.search(stripped)
+    match = _INDEX_PATTERN.fullmatch(stripped)
     if match is None:
         return None
     one_based = int(match.group(1))
