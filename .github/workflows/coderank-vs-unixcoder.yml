@@ -1,0 +1,258 @@
+name: coderank-vs-unixcoder
+
+on:
+  push:
+    branches: ["analysis/coderank-vs-unixcoder"]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: coderank-unixcoder-${{ runner.os }}-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install encoder dependencies
+        run: python -m pip install -e ".[hf,coderank]"
+      - name: Clone exact benchmark revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"
+            sha="$2"
+            dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/recent
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/recent/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/recent/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/recent/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/recent/scrapling
+      - name: Compare compact code encoders
+        run: |
+          python - <<'PY'
+          import copy
+          import json
+          import math
+          import re
+          from collections import Counter
+
+          import torch
+          from torch.nn import functional as F
+
+          from cdm import CodeDecisionModel, CodeRankEncoder, UniXcoderEncoder
+          from cdm.evaluation import (
+              accuracy,
+              cluster_bootstrap_accuracy,
+              cluster_bootstrap_macro_namespace_accuracy,
+              macro_namespace_accuracy,
+              per_namespace_accuracy,
+          )
+          from cdm.focus import focus_hard_call_context
+          from cdm.repository import (
+              namespace_repository_examples,
+              repository_hard_masked_call_examples,
+              split_repository_examples_by_namespace,
+          )
+          from cdm.training import encoded_example_loss, preencode_examples
+
+          REPOS = {
+              'browser-use': '/tmp/recent/browser-use',
+              'crawl4ai': '/tmp/recent/crawl4ai',
+              'markitdown': '/tmp/recent/markitdown',
+              'scrapling': '/tmp/recent/scrapling',
+          }
+          K = 4
+          BODY_CHARS = 512
+          MAX_LENGTH = 512
+          TOKEN = re.compile(r'[A-Za-z_][A-Za-z_0-9]*|\d+')
+
+          def repo_of(example):
+              return example.source.split('::', 1)[0]
+
+          def count_by_repo(examples):
+              return dict(sorted(Counter(repo_of(e) for e in examples).items()))
+
+          def token_set(text):
+              stop = {
+                  'def','async','return','if','else','for','in','and','or','not',
+                  'the','a','an','to','of','is','this','call_target','none','true','false',
+                  'omitted','before','after','site',
+              }
+              return {t.lower() for t in TOKEN.findall(text) if len(t) > 1 and t.lower() not in stop}
+
+          def lexical_predictions(examples):
+              preds = []
+              for example in examples:
+                  ctx = token_set(example.context)
+                  scores = []
+                  for candidate in example.candidates:
+                      cand = token_set(candidate)
+                      union = ctx | cand
+                      scores.append(len(ctx & cand) / max(1, len(union)))
+                  preds.append(max(range(len(scores)), key=scores.__getitem__))
+              return preds
+
+          @torch.no_grad()
+          def cosine_predictions(encoded):
+              preds = []
+              for item in encoded:
+                  context = F.normalize(item.decision_context.context.float(), dim=0)
+                  candidates = F.normalize(item.candidate_embeddings.float(), dim=1)
+                  preds.append(int(torch.mv(candidates, context).argmax()))
+              return preds
+
+          @torch.no_grad()
+          def mean_loss(model, encoded):
+              model.scorer.eval()
+              return sum(float(encoded_example_loss(model, item)) for item in encoded) / len(encoded)
+
+          @torch.no_grad()
+          def model_predictions(model, encoded):
+              preds = []
+              model.scorer.eval()
+              for item in encoded:
+                  preds.append(int(model.score_encoded(item.decision_context, item.candidate_embeddings).argmax()))
+              return preds
+
+          def train_head(encoded_train, encoded_val, encoded_test, test_examples, encoder, dim, seed):
+              torch.manual_seed(seed)
+              model = CodeDecisionModel(encoder=encoder, dim=dim, hidden=32)
+              optimizer = torch.optim.AdamW(model.scorer.parameters(), lr=1e-3, weight_decay=1e-2)
+              best_state = copy.deepcopy(model.scorer.state_dict())
+              best_val = float('inf')
+              best_epoch = 0
+              stale = 0
+              for epoch in range(1, 41):
+                  model.scorer.train()
+                  generator = torch.Generator().manual_seed(seed * 10000 + epoch)
+                  order = torch.randperm(len(encoded_train), generator=generator).tolist()
+                  for idx in order:
+                      optimizer.zero_grad(set_to_none=True)
+                      loss = encoded_example_loss(model, encoded_train[idx])
+                      loss.backward()
+                      torch.nn.utils.clip_grad_norm_(model.scorer.parameters(), 1.0)
+                      optimizer.step()
+                  val = mean_loss(model, encoded_val)
+                  if val < best_val - 1e-5:
+                      best_val = val
+                      best_epoch = epoch
+                      best_state = copy.deepcopy(model.scorer.state_dict())
+                      stale = 0
+                  else:
+                      stale += 1
+                  if epoch >= 8 and stale >= 7:
+                      break
+              model.scorer.load_state_dict(best_state)
+              preds = model_predictions(model, encoded_test)
+              return {
+                  'seed': seed,
+                  'best_epoch': best_epoch,
+                  'validation_nll': best_val,
+                  'test_accuracy': accuracy(test_examples, preds),
+                  'test_macro': macro_namespace_accuracy(test_examples, preds),
+                  'test_by_repo': per_namespace_accuracy(test_examples, preds),
+              }
+
+          def summarize_runs(runs):
+              values = [r['test_accuracy'] for r in runs]
+              macros = [r['test_macro'] for r in runs]
+              mean = sum(values) / len(values)
+              macro_mean = sum(macros) / len(macros)
+              return {
+                  'mean': mean,
+                  'std': math.sqrt(sum((x - mean) ** 2 for x in values) / len(values)),
+                  'min': min(values),
+                  'max': max(values),
+                  'macro_mean': macro_mean,
+                  'macro_min': min(macros),
+                  'macro_max': max(macros),
+              }
+
+          def score_with_uncertainty(examples, preds):
+              micro = cluster_bootstrap_accuracy(examples, preds, bootstrap_samples=2000, seed=17)
+              macro = cluster_bootstrap_macro_namespace_accuracy(examples, preds, bootstrap_samples=2000, seed=23)
+              return {
+                  'accuracy': accuracy(examples, preds),
+                  'by_repo': per_namespace_accuracy(examples, preds),
+                  'macro': macro_namespace_accuracy(examples, preds),
+                  'micro_ci95': [micro.lower, micro.upper],
+                  'macro_ci95': [macro.lower, macro.upper],
+              }
+
+          pooled = []
+          extraction = {}
+          for name, root in REPOS.items():
+              examples = repository_hard_masked_call_examples(
+                  root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+              )
+              examples = [focus_hard_call_context(e, radius_lines=0) for e in examples]
+              extraction[name] = {
+                  'examples': len(examples),
+                  'source_files': len({e.source for e in examples}),
+              }
+              pooled.extend(namespace_repository_examples(examples, name))
+
+          dataset = split_repository_examples_by_namespace(
+              pooled, seed=0, train_fraction=0.70, validation_fraction=0.15, small_namespace='train'
+          )
+          ordered = list(dataset.train) + list(dataset.validation) + list(dataset.test)
+          n_train = len(dataset.train)
+          n_val = len(dataset.validation)
+
+          lexical_test = lexical_predictions(dataset.test)
+
+          def evaluate_encoder(name, encoder, batch_size):
+              shell = CodeDecisionModel(encoder=encoder, dim=encoder.dim, hidden=32)
+              encoded = preencode_examples(shell, ordered, batch_size=batch_size)
+              train = encoded[:n_train]
+              val = encoded[n_train:n_train+n_val]
+              test = encoded[n_train+n_val:]
+              cosine = cosine_predictions(test)
+              runs = [train_head(train, val, test, dataset.test, encoder, encoder.dim, seed) for seed in range(5)]
+              return {
+                  'dim': encoder.dim,
+                  'cosine_test': score_with_uncertainty(dataset.test, cosine),
+                  'head_runs': runs,
+                  'head_summary': summarize_runs(runs),
+              }
+
+          unix = evaluate_encoder(
+              'unixcoder', UniXcoderEncoder(frozen=True, max_length=MAX_LENGTH), 8
+          )
+          coderank = evaluate_encoder(
+              'coderank', CodeRankEncoder(max_length=MAX_LENGTH, normalize_embeddings=False), 8
+          )
+
+          report = {
+              'candidate_count': K,
+              'context': 'radius_0 call-site focus',
+              'random_expected': 1.0 / K,
+              'extraction': extraction,
+              'split_sizes': {
+                  'train': len(dataset.train),
+                  'validation': len(dataset.validation),
+                  'test': len(dataset.test),
+              },
+              'split_by_repo': {
+                  'train': count_by_repo(dataset.train),
+                  'validation': count_by_repo(dataset.validation),
+                  'test': count_by_repo(dataset.test),
+              },
+              'lexical_test': score_with_uncertainty(dataset.test, lexical_test),
+              'unixcoder': unix,
+              'coderank': coderank,
+          }
+          print('CODERANK_VS_UNIXCODER_JSON=' + json.dumps(report, sort_keys=True))
+          PY
