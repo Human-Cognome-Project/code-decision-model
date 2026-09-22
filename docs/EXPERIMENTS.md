@@ -180,3 +180,10 @@ Census:
 ```bash
 python examples/census_cross_file_calls.py
 ```
+
+
+## E031 — Development-independent replication
+
+See [E031_INDEPENDENT_REPLICATION_PREREG.md](E031_INDEPENDENT_REPLICATION_PREREG.md).
+
+Preregisters the primary post-E027 validation gate before inspecting extraction density or model outcomes on the new repositories. Eight repositories are pinned in advance; the first four meeting a fixed extraction-only eligibility rule form the replication set. The primary run uses the frozen E027 same-file task, CodeRank + PairwiseMLP scorer, Qwen revision, two-attempt loop, and E026 paired statistics. E029 and E030 are explicitly excluded from the primary result.
