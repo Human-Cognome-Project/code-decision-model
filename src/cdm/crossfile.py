@@ -1,4 +1,4 @@
-"""Machine-verified cross-file call supervision (E028).
+"""Machine-verified cross-file call supervision (E029).
 
 Every existing hard task resolves a masked call inside one file. This module
 adds the first cross-file decision with the same integrity controls. The label

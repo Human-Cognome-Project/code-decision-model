@@ -1,4 +1,4 @@
-"""Tests for import-resolved cross-file call supervision (E028)."""
+"""Tests for import-resolved cross-file call supervision (E029)."""
 from __future__ import annotations
 
 import ast

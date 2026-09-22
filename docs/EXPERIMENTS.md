@@ -145,9 +145,16 @@ The next gate is development-independent replication on a second pinned reposito
 set. Current exploratory directions are tracked in
 [OPEN_DIRECTIONS.md](OPEN_DIRECTIONS.md).
 
-## E028 — Import-resolved cross-file call supervision
 
-See [E028_CROSS_FILE_CALLS.md](E028_CROSS_FILE_CALLS.md).
+## E028 — Failure-conditioned structured-selection analysis
+
+See [E028_FAILURE_CONDITIONED_ANALYSIS.md](E028_FAILURE_CONDITIONED_ANALYSIS.md).
+
+Adds an analysis-only decomposition of remaining assisted failures into machine-counted mechanisms: wrong recommendations, ignored correct recommendations, failure to recover after deterministic feedback, and structured-output parse failures. It changes none of the frozen E027 protocol.
+
+## E029 — Import-resolved cross-file call supervision
+
+See [E029_CROSS_FILE_CALLS.md](E029_CROSS_FILE_CALLS.md).
 
 First cross-file decision type under the existing integrity controls. Labels
 come from deterministic resolution of module-level imports to top-level

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E028 census: how much cross-file supervision a repository supplies.
+"""E029 census: how much cross-file supervision a repository supplies.
 
 Reports import-resolved cross-file call decisions next to the existing hard
 same-file function and same-class method decisions, at the same candidate count,

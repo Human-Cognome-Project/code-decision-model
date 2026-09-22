@@ -1,9 +1,9 @@
-# E028 — Import-resolved cross-file call supervision
+# E029 — Import-resolved cross-file call supervision
 
 Every hard task in the frozen E027 protocol resolves a masked call inside one
 file: same-file function calls (E006) and same-class method calls (E015). The
 architecture claim is about repository decisions, and OPEN_DIRECTIONS lists
-cross-file callable selection as the next machine-verifiable step. E028 adds it
+cross-file callable selection as the next machine-verifiable step. E029 adds it
 without a language server.
 
 ## Label
@@ -60,7 +60,7 @@ on it unchanged.
 | --- | ---: |
 | hard same-file function calls (E006) | 59 |
 | hard same-class method calls (E015) | 4 |
-| hard cross-file function calls (E028) | 70 |
+| hard cross-file function calls (E029) | 70 |
 
 Cross-file supervision is at least as dense as same-file supervision here.
 Counts are for the commit snapshot: test files import from `cdm`, so tests
