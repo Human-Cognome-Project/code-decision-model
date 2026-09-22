@@ -1,0 +1,175 @@
+name: click-masked-benchmark
+
+on:
+  push:
+    branches: ["analysis/click-masked-benchmark"]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: unixcoder-base-v4-${{ runner.os }}-py312-click-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project with encoder dependencies
+        run: python -m pip install -e ".[hf]"
+      - name: Clone Click
+        run: git clone --depth 1 https://github.com/pallets/click.git /tmp/click
+      - name: Benchmark masked call recovery
+        run: |
+          python - <<'PY'
+          import copy
+          import json
+          import math
+          import re
+
+          import torch
+          from torch.nn import functional as F
+
+          from cdm import CodeDecisionModel, UniXcoderEncoder
+          from cdm.repository import repository_masked_call_examples, split_repository_examples
+          from cdm.training import (
+              accuracy_encoded,
+              encoded_example_loss,
+              preencode_examples,
+          )
+
+          TOKEN = re.compile(r"[A-Za-z_][A-Za-z_0-9]*|\d+")
+
+          def token_set(text):
+              stop = {
+                  "def", "return", "if", "else", "for", "in", "and", "or", "not",
+                  "the", "a", "an", "to", "of", "is", "this", "file", "call_target",
+              }
+              return {
+                  token.lower()
+                  for token in TOKEN.findall(text)
+                  if token.lower() not in stop and len(token) > 1
+              }
+
+          def lexical_accuracy(examples):
+              correct = 0
+              for example in examples:
+                  context = token_set(example.context)
+                  scores = []
+                  for candidate in example.candidates:
+                      cand = token_set(candidate)
+                      union = context | cand
+                      scores.append(len(context & cand) / max(1, len(union)))
+                  correct += max(range(len(scores)), key=scores.__getitem__) == example.answer_index
+              return correct / len(examples) if examples else float("nan")
+
+          @torch.no_grad()
+          def cosine_accuracy(encoded):
+              correct = 0
+              for item in encoded:
+                  context = F.normalize(item.decision_context.context.float(), dim=0)
+                  candidates = F.normalize(item.candidate_embeddings.float(), dim=1)
+                  pred = int(torch.mv(candidates, context).argmax())
+                  correct += pred == item.answer_index
+              return correct / len(encoded) if encoded else float("nan")
+
+          def train_head(encoded_train, encoded_val, encoded_test, encoder, dim, seed):
+              torch.manual_seed(seed)
+              model = CodeDecisionModel(encoder=encoder, dim=dim, hidden=64)
+              # Encoder is already frozen. Only the decision head is optimized.
+              optimizer = torch.optim.AdamW(model.scorer.parameters(), lr=2e-3, weight_decay=1e-3)
+              best_state = copy.deepcopy(model.scorer.state_dict())
+              best_val = -1.0
+              best_epoch = 0
+
+              for epoch in range(1, 81):
+                  model.scorer.train()
+                  order = torch.randperm(len(encoded_train), generator=torch.Generator().manual_seed(seed * 1000 + epoch))
+                  for idx in order.tolist():
+                      optimizer.zero_grad(set_to_none=True)
+                      loss = encoded_example_loss(model, encoded_train[idx])
+                      loss.backward()
+                      optimizer.step()
+
+                  val = accuracy_encoded(model, encoded_val)
+                  if val > best_val:
+                      best_val = val
+                      best_epoch = epoch
+                      best_state = copy.deepcopy(model.scorer.state_dict())
+
+              model.scorer.load_state_dict(best_state)
+              return {
+                  "seed": seed,
+                  "best_epoch": best_epoch,
+                  "train": accuracy_encoded(model, encoded_train),
+                  "validation": accuracy_encoded(model, encoded_val),
+                  "test": accuracy_encoded(model, encoded_test),
+              }
+
+          torch.manual_seed(0)
+          examples = repository_masked_call_examples(
+              "/tmp/click",
+              max_candidates=16,
+              candidate_body_chars=512,
+              seed=0,
+          )
+          split = split_repository_examples(examples, seed=0)
+
+          encoder = UniXcoderEncoder(
+              frozen=True,
+              max_length=256,
+          )
+          shell = CodeDecisionModel(encoder=encoder, dim=encoder.dim, hidden=64)
+
+          all_examples = list(split.train) + list(split.validation) + list(split.test)
+          encoded_all = preencode_examples(shell, all_examples, batch_size=8)
+          n_train = len(split.train)
+          n_val = len(split.validation)
+          encoded_train = encoded_all[:n_train]
+          encoded_val = encoded_all[n_train:n_train+n_val]
+          encoded_test = encoded_all[n_train+n_val:]
+
+          runs = [
+              train_head(
+                  encoded_train,
+                  encoded_val,
+                  encoded_test,
+                  encoder,
+                  encoder.dim,
+                  seed,
+              )
+              for seed in range(5)
+          ]
+          tests = [run["test"] for run in runs]
+          mean_test = sum(tests) / len(tests)
+          std_test = math.sqrt(sum((x - mean_test) ** 2 for x in tests) / len(tests))
+
+          answer_counts = {}
+          for example in split.test:
+              answer_counts[example.answer_index] = answer_counts.get(example.answer_index, 0) + 1
+          majority_position = max(answer_counts.values()) / len(split.test)
+
+          report = {
+              "repository": "pallets/click",
+              "setting": "transductive repository index; caller files disjoint by split",
+              "examples": len(examples),
+              "train": len(split.train),
+              "validation": len(split.validation),
+              "test": len(split.test),
+              "candidates_per_example": len(examples[0].candidates),
+              "random_expected": 1.0 / len(examples[0].candidates),
+              "majority_answer_position_test": majority_position,
+              "lexical_test": lexical_accuracy(split.test),
+              "unixcoder_cosine_test": cosine_accuracy(encoded_test),
+              "trained_head_runs": runs,
+              "trained_head_test_mean": mean_test,
+              "trained_head_test_std": std_test,
+          }
+          print("BENCHMARK_JSON=" + json.dumps(report, sort_keys=True))
+          PY
