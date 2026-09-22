@@ -1,0 +1,265 @@
+name: combined-function-method-benchmark
+
+on:
+  push:
+    branches: ["analysis/combined-function-method-benchmark-v2"]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: coderank-unixcoder-${{ runner.os }}-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install encoder dependencies
+        run: python -m pip install -e ".[hf,coderank]"
+      - name: Clone exact benchmark revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"
+            sha="$2"
+            dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/recent
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/recent/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/recent/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/recent/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/recent/scrapling
+      - name: Run combined decision benchmark
+        run: |
+          python - <<'PY'
+          import copy
+          import json
+          import math
+          import re
+          from collections import Counter, defaultdict
+
+          import torch
+          from torch.nn import functional as F
+
+          from cdm import CodeDecisionModel, CodeRankEncoder, UniXcoderEncoder
+          from cdm.evaluation import (
+              accuracy,
+              cluster_bootstrap_accuracy,
+              cluster_bootstrap_macro_namespace_accuracy,
+              macro_namespace_accuracy,
+              per_namespace_accuracy,
+          )
+          from cdm.focus import focus_hard_call_context
+          from cdm.methods import repository_hard_masked_method_call_examples
+          from cdm.repository import (
+              namespace_repository_examples,
+              repository_hard_masked_call_examples,
+              split_repository_examples_by_namespace,
+          )
+          from cdm.training import encoded_example_loss, preencode_examples
+
+          REPOS = {
+              'browser-use': '/tmp/recent/browser-use',
+              'crawl4ai': '/tmp/recent/crawl4ai',
+              'markitdown': '/tmp/recent/markitdown',
+              'scrapling': '/tmp/recent/scrapling',
+          }
+          K = 4
+          BODY_CHARS = 512
+          MAX_LENGTH = 512
+          TOKEN = re.compile(r'[A-Za-z_][A-Za-z_0-9]*|\d+')
+
+          def repo_of(e):
+              return e.source.split('::', 1)[0]
+
+          def task_name(e):
+              return 'method' if 'same_class' in e.task else 'function'
+
+          def counts(examples, key):
+              c = Counter(key(e) for e in examples)
+              return dict(sorted(c.items()))
+
+          def token_set(text):
+              stop = {
+                  'def','async','return','if','else','for','in','and','or','not',
+                  'the','a','an','to','of','is','this','call_target','none','true','false',
+                  'omitted','before','after','site','method','function',
+              }
+              return {t.lower() for t in TOKEN.findall(text) if len(t) > 1 and t.lower() not in stop}
+
+          def lexical_predictions(examples):
+              preds=[]
+              for e in examples:
+                  ctx=token_set(e.context)
+                  scores=[]
+                  for candidate in e.candidates:
+                      cand=token_set(candidate)
+                      union=ctx|cand
+                      scores.append(len(ctx&cand)/max(1,len(union)))
+                  preds.append(max(range(len(scores)),key=scores.__getitem__))
+              return preds
+
+          @torch.no_grad()
+          def cosine_predictions(encoded):
+              out=[]
+              for item in encoded:
+                  q=F.normalize(item.decision_context.context.float(),dim=0)
+                  c=F.normalize(item.candidate_embeddings.float(),dim=1)
+                  out.append(int(torch.mv(c,q).argmax()))
+              return out
+
+          @torch.no_grad()
+          def mean_loss(model, encoded):
+              model.scorer.eval()
+              return sum(float(encoded_example_loss(model,x)) for x in encoded)/len(encoded)
+
+          @torch.no_grad()
+          def model_predictions(model, encoded):
+              model.scorer.eval()
+              return [int(model.score_encoded(x.decision_context,x.candidate_embeddings).argmax()) for x in encoded]
+
+          def subgroup_accuracy(examples,preds,key):
+              buckets=defaultdict(lambda:[0,0])
+              for e,p in zip(examples,preds):
+                  b=buckets[key(e)]
+                  b[0]+=int(p==e.answer_index)
+                  b[1]+=1
+              return {k:v[0]/v[1] for k,v in sorted(buckets.items())}
+
+          def score(examples,preds):
+              micro=cluster_bootstrap_accuracy(examples,preds,bootstrap_samples=3000,seed=17)
+              macro=cluster_bootstrap_macro_namespace_accuracy(examples,preds,bootstrap_samples=3000,seed=23)
+              return {
+                  'accuracy':accuracy(examples,preds),
+                  'macro_repo':macro_namespace_accuracy(examples,preds),
+                  'by_repo':per_namespace_accuracy(examples,preds),
+                  'by_task':subgroup_accuracy(examples,preds,task_name),
+                  'micro_ci95':[micro.lower,micro.upper],
+                  'macro_ci95':[macro.lower,macro.upper],
+              }
+
+          def train_head(train,val,test,test_examples,encoder,dim,seed):
+              torch.manual_seed(seed)
+              model=CodeDecisionModel(encoder=encoder,dim=dim,hidden=32)
+              opt=torch.optim.AdamW(model.scorer.parameters(),lr=1e-3,weight_decay=1e-2)
+              best=copy.deepcopy(model.scorer.state_dict())
+              best_val=float('inf')
+              best_epoch=0
+              stale=0
+              for epoch in range(1,41):
+                  model.scorer.train()
+                  order=torch.randperm(len(train),generator=torch.Generator().manual_seed(seed*10000+epoch)).tolist()
+                  for idx in order:
+                      opt.zero_grad(set_to_none=True)
+                      loss=encoded_example_loss(model,train[idx])
+                      loss.backward()
+                      torch.nn.utils.clip_grad_norm_(model.scorer.parameters(),1.0)
+                      opt.step()
+                  val_loss=mean_loss(model,val)
+                  if val_loss<best_val-1e-5:
+                      best_val=val_loss
+                      best_epoch=epoch
+                      best=copy.deepcopy(model.scorer.state_dict())
+                      stale=0
+                  else:
+                      stale+=1
+                  if epoch>=8 and stale>=7:
+                      break
+              model.scorer.load_state_dict(best)
+              preds=model_predictions(model,test)
+              result=score(test_examples,preds)
+              return {
+                  'seed':seed,
+                  'best_epoch':best_epoch,
+                  'validation_nll':best_val,
+                  'test':result,
+              }
+
+          def summarize(runs):
+              vals=[r['test']['accuracy'] for r in runs]
+              macros=[r['test']['macro_repo'] for r in runs]
+              mean=sum(vals)/len(vals)
+              return {
+                  'mean':mean,
+                  'std':math.sqrt(sum((x-mean)**2 for x in vals)/len(vals)),
+                  'min':min(vals),
+                  'max':max(vals),
+                  'macro_mean':sum(macros)/len(macros),
+                  'by_task_mean':{
+                      task:sum(r['test']['by_task'][task] for r in runs)/len(runs)
+                      for task in ('function','method')
+                  },
+              }
+
+          pooled=[]
+          extraction={}
+          for name,root in REPOS.items():
+              funcs=repository_hard_masked_call_examples(root,candidate_count=K,candidate_body_chars=BODY_CHARS,seed=0)
+              methods=repository_hard_masked_method_call_examples(root,candidate_count=K,candidate_body_chars=BODY_CHARS,seed=0)
+              funcs=[focus_hard_call_context(e,radius_lines=0) for e in funcs]
+              methods=[focus_hard_call_context(e,radius_lines=0) for e in methods]
+              extraction[name]={
+                  'functions':len(funcs),
+                  'methods':len(methods),
+                  'sources':len({e.source for e in [*funcs,*methods]}),
+              }
+              pooled.extend(namespace_repository_examples(funcs,name))
+              pooled.extend(namespace_repository_examples(methods,name))
+
+          dataset=split_repository_examples_by_namespace(
+              pooled,seed=0,train_fraction=0.70,validation_fraction=0.15,small_namespace='train'
+          )
+          ordered=list(dataset.train)+list(dataset.validation)+list(dataset.test)
+          n_train=len(dataset.train)
+          n_val=len(dataset.validation)
+
+          lexical=score(dataset.test,lexical_predictions(dataset.test))
+
+          def evaluate(encoder,batch):
+              shell=CodeDecisionModel(encoder=encoder,dim=encoder.dim,hidden=32)
+              encoded=preencode_examples(shell,ordered,batch_size=batch)
+              train=encoded[:n_train]
+              val=encoded[n_train:n_train+n_val]
+              test=encoded[n_train+n_val:]
+              cosine=score(dataset.test,cosine_predictions(test))
+              runs=[train_head(train,val,test,dataset.test,encoder,encoder.dim,seed) for seed in range(5)]
+              return {
+                  'dim':encoder.dim,
+                  'cosine':cosine,
+                  'head_runs':runs,
+                  'head_summary':summarize(runs),
+              }
+
+          report={
+              'candidate_count':K,
+              'context':'radius_0 call-site focus',
+              'total_examples':len(pooled),
+              'extraction':extraction,
+              'split_sizes':{'train':len(dataset.train),'validation':len(dataset.validation),'test':len(dataset.test)},
+              'split_by_repo':{
+                  'train':counts(dataset.train,repo_of),
+                  'validation':counts(dataset.validation,repo_of),
+                  'test':counts(dataset.test,repo_of),
+              },
+              'split_by_task':{
+                  'train':counts(dataset.train,task_name),
+                  'validation':counts(dataset.validation,task_name),
+                  'test':counts(dataset.test,task_name),
+              },
+              'random_expected':1.0/K,
+              'lexical':lexical,
+              'unixcoder':evaluate(UniXcoderEncoder(frozen=True,max_length=MAX_LENGTH),8),
+              'coderank':evaluate(CodeRankEncoder(max_length=MAX_LENGTH,normalize_embeddings=False),8),
+          }
+          print('COMBINED_DECISION_JSON='+json.dumps(report,sort_keys=True))
+          PY
