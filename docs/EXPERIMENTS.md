@@ -144,3 +144,19 @@ and the repository-stratified source-file bootstrap 95% interval was +14.37 to
 The next gate is development-independent replication on a second pinned repository
 set. Current exploratory directions are tracked in
 [OPEN_DIRECTIONS.md](OPEN_DIRECTIONS.md).
+
+## E028 — Import-resolved cross-file call supervision
+
+See [E028_CROSS_FILE_CALLS.md](E028_CROSS_FILE_CALLS.md).
+
+First cross-file decision type under the existing integrity controls. Labels
+come from deterministic resolution of module-level imports to top-level
+functions in other repository files; no language server or model is involved.
+The task is registered with the E021/E023 verifiers so the frozen E027 protocol
+runs on it unchanged.
+
+Census:
+
+```bash
+python examples/census_cross_file_calls.py
+```

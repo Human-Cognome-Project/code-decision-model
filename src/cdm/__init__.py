@@ -23,6 +23,7 @@ from .repair import (
     verify_repair,
 )
 from .binding import CallShape, CallSiteBindable, Parameters
+from .crossfile import repository_hard_masked_cross_file_call_examples
 from .corrective import (
     ArmSummary,
     ExactTest,
@@ -64,6 +65,7 @@ __all__ = [
     "run_paired_repair",
     "run_repair_loop",
     "verify_repair",
+    "repository_hard_masked_cross_file_call_examples",
     "ArmSummary",
     "ExactTest",
     "PairedCorrectiveSummary",
