@@ -23,6 +23,12 @@ from .repair import (
     verify_repair,
 )
 from .binding import CallShape, CallSiteBindable, Parameters
+from .rejection_memory import (
+    RejectionMemoryTrace,
+    build_rejection_memory_prompt,
+    run_selection_loop_with_rejection_memory,
+    verify_selection_with_memory,
+)
 from .corrective import (
     ArmSummary,
     ExactTest,
@@ -77,6 +83,10 @@ __all__ = [
     "CallShape",
     "CallSiteBindable",
     "Parameters",
+    "RejectionMemoryTrace",
+    "build_rejection_memory_prompt",
+    "run_selection_loop_with_rejection_memory",
+    "verify_selection_with_memory",
     "AllAllowed",
     "ConstrainedDecision",
     "Constraint",
