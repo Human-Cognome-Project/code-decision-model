@@ -38,19 +38,41 @@ class CodeDecisionModel(nn.Module):
             nn.Linear(hidden, 1),
         )
 
+    def encode_texts(
+        self,
+        texts: Sequence[str],
+        *,
+        role: str,
+    ) -> torch.Tensor:
+        """Encode texts with an optional semantic role understood by the backbone.
+
+        Legacy encoders keep working through the ordinary forward path. Retrieval-style
+        encoders can expose encode_role(texts, role=...) to distinguish query/context
+        representations from candidate-code representations.
+        """
+        if role not in {"context", "question", "candidate"}:
+            raise ValueError(f"unsupported encoder role: {role}")
+        role_encoder = getattr(self.encoder, "encode_role", None)
+        if role_encoder is None:
+            enc = self.encoder(texts)
+        else:
+            enc = role_encoder(texts, role=role)
+        if enc.ndim != 2 or enc.shape != (len(texts), self.dim):
+            raise ValueError(
+                f"encoder returned {tuple(enc.shape)}, expected "
+                f"({len(texts)}, {self.dim}) for role {role}"
+            )
+        return enc
+
     def encode_context(self, code_context: str, question: str) -> EncodedDecisionContext:
-        enc = self.encoder([code_context, question])
-        if enc.shape != (2, self.dim):
-            raise ValueError(f"encoder returned {tuple(enc.shape)}, expected (2, {self.dim})")
-        return EncodedDecisionContext(context=enc[0], question=enc[1])
+        context = self.encode_texts([code_context], role="context")[0]
+        q = self.encode_texts([question], role="question")[0]
+        return EncodedDecisionContext(context=context, question=q)
 
     def encode_candidates(self, candidates: Sequence[str]) -> torch.Tensor:
         if not candidates:
             raise ValueError("at least one candidate is required")
-        enc = self.encoder(candidates)
-        if enc.ndim != 2 or enc.shape[1] != self.dim:
-            raise ValueError(f"encoder returned invalid candidate shape {tuple(enc.shape)}")
-        return enc
+        return self.encode_texts(candidates, role="candidate")
 
     def score_encoded(
         self,
