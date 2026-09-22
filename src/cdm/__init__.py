@@ -30,6 +30,18 @@ from .rejection_memory import (
     verify_selection_with_memory,
 )
 from .crossfile import repository_hard_masked_cross_file_call_examples
+from .argument_ops import (
+    ArgumentRepairExample,
+    ArgumentRepairOutcome,
+    OperationPlan,
+    PairedArgumentRepairOutcome,
+    argument_repair_example,
+    argument_repair_examples,
+    predicate_search,
+    run_argument_repair_loop,
+    run_paired_argument_repair,
+    verify_argument_repair,
+)
 from .call_intent import (
     CallIntentOutcome,
     CallIntentVerification,
@@ -87,6 +99,16 @@ __all__ = [
     "run_repair_loop",
     "verify_repair",
     "repository_hard_masked_cross_file_call_examples",
+    "ArgumentRepairExample",
+    "ArgumentRepairOutcome",
+    "OperationPlan",
+    "PairedArgumentRepairOutcome",
+    "argument_repair_example",
+    "argument_repair_examples",
+    "predicate_search",
+    "run_argument_repair_loop",
+    "run_paired_argument_repair",
+    "verify_argument_repair",
     "CallIntentOutcome",
     "CallIntentVerification",
     "PairedCallIntentOutcome",
