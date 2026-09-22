@@ -12,6 +12,7 @@ from .synthetic import DecisionExample
 _SUPPORTED_TASKS = frozenset({
     "python.hard_masked_direct_call",
     "python.hard_masked_same_class_call",
+    "python.hard_masked_cross_file_call",
 })
 _SIGNATURE = re.compile(r"^([A-Za-z_][A-Za-z_0-9]*)[ 	]*[(]")
 
