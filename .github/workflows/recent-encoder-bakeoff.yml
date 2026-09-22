@@ -52,6 +52,15 @@ jobs:
           from torch.nn import functional as F
           from sentence_transformers import SentenceTransformer
 
+          # CodeSage's current remote modeling file still imports Conv1D from
+          # transformers.modeling_utils, while newer Transformers exposes it from
+          # transformers.pytorch_utils. Alias the unchanged class before loading the
+          # remote module rather than pinning the entire benchmark to an old release.
+          import transformers.modeling_utils as modeling_utils
+          from transformers.pytorch_utils import Conv1D
+          if not hasattr(modeling_utils, "Conv1D"):
+              modeling_utils.Conv1D = Conv1D
+
           from cdm import CodeDecisionModel, UniXcoderEncoder
           from cdm.ablation import ablate_hard_call_identifiers
           from cdm.repository import (
@@ -175,6 +184,13 @@ jobs:
                   examples,
                   unix_predictions(examples, unix),
               )
+          print(
+              "ENCODER_MODEL_JSON="
+              + json.dumps(
+                  {"model": "unixcoder-base", "result": report["models"]["unixcoder-base"]},
+                  sort_keys=True,
+              )
+          )
           del unix
           gc.collect()
 
@@ -207,6 +223,13 @@ jobs:
               for mode, examples in modes.items():
                   preds = st_predictions(examples, model, query_prefix=prefix)
                   report["models"][short_name][mode] = score(examples, preds)
+              print(
+                  "ENCODER_MODEL_JSON="
+                  + json.dumps(
+                      {"model": short_name, "result": report["models"][short_name]},
+                      sort_keys=True,
+                  )
+              )
               del model
               gc.collect()
 
