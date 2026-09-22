@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""E022 mock: exercise the corrective-turn harness without a real generator.
+"""E021 companion: exercise the corrective-turn harness without a real model.
 
-Deterministic generators demonstrate the measurement contract:
+Two deterministic generators demonstrate the paired measurement contract:
 
-- recommendation_follower: uses a recommended candidate on the first attempt
-  when present; otherwise fails once and recovers from verifier feedback.
-- stubborn_wrong: always emits a valid but incorrect candidate.
+- recommendation_sensitive: baseline needs one correction, assisted succeeds first try.
+- stubborn_wrong: both arms fail and no correction-turn delta is fabricated.
 
 Run:
 
@@ -13,19 +12,12 @@ Run:
 """
 from __future__ import annotations
 
-import re
-
 from cdm.repair import (
     candidate_symbol,
     expected_repair_source,
     run_paired_repair,
 )
 from cdm.synthetic import DecisionExample
-
-_RECOMMENDATION = re.compile(
-    r"candidate (\d+) is recommended",
-    re.IGNORECASE,
-)
 
 
 def _example() -> DecisionExample:
@@ -51,29 +43,16 @@ def parse(value):
     )
 
 
-def _repair_with(example: DecisionExample, candidate_index: int) -> str:
-    name = candidate_symbol(example.candidates[candidate_index])
-    return example.context.replace("__CALL_TARGET__", name)
-
-
-def _recommendation_follower_factory(example: DecisionExample):
-    """Prefer a stated recommendation; otherwise recover after feedback."""
-
+def _recommendation_sensitive_factory(example: DecisionExample):
+    """Use a correct recommendation immediately; otherwise require feedback."""
     expected = expected_repair_source(example)
-    true_index = example.answer_index
+    expected_marker = f"candidate {example.answer_index + 1} is recommended"
 
     def generate(prompt: str) -> str:
-        match = _RECOMMENDATION.search(prompt)
-        if match is not None:
-            # Trust the fallible recommendation on the first pass.
-            index = int(match.group(1)) - 1
-            if 0 <= index < len(example.candidates):
-                return _repair_with(example, index)
-
+        if expected_marker in prompt:
+            return expected
         if "Deterministic verifier feedback:" in prompt:
             return expected
-
-        # No recommendation and no feedback yet: leave the placeholder.
         return example.context
 
     return generate
@@ -82,7 +61,8 @@ def _recommendation_follower_factory(example: DecisionExample):
 def _stubborn_wrong_factory(example: DecisionExample):
     """Always emit a wrong but syntactically valid repair."""
     wrong_index = 1 if example.answer_index == 0 else 0
-    wrong_source = _repair_with(example, wrong_index)
+    wrong_name = candidate_symbol(example.candidates[wrong_index])
+    wrong_source = example.context.replace("__CALL_TARGET__", wrong_name)
 
     def generate(prompt: str) -> str:
         return wrong_source
@@ -110,27 +90,18 @@ def _report(label: str, paired) -> None:
 def main() -> None:
     example = _example()
     true_index = example.answer_index
-    wrong_index = 1 if true_index == 0 else 0
 
-    # Correct recommendation: assisted should first-pass; baseline needs a correction.
-    paired_good = run_paired_repair(
+    paired_positive = run_paired_repair(
         example,
-        lambda: _recommendation_follower_factory(example),
+        lambda: _recommendation_sensitive_factory(example),
         recommendation_index=true_index,
         max_attempts=3,
     )
-    _report("recommendation_follower (correct recommendation)", paired_good)
-
-    # Wrong recommendation: assisted may be harmed; harness must still report honestly.
-    paired_bad = run_paired_repair(
-        example,
-        lambda: _recommendation_follower_factory(example),
-        recommendation_index=wrong_index,
-        max_attempts=3,
+    _report(
+        "recommendation_sensitive (correct recommendation)",
+        paired_positive,
     )
-    _report("recommendation_follower (wrong recommendation)", paired_bad)
 
-    # Both arms fail; delta must stay None.
     paired_stubborn = run_paired_repair(
         example,
         lambda: _stubborn_wrong_factory(example),
@@ -139,15 +110,17 @@ def main() -> None:
     )
     _report("stubborn_wrong (both fail)", paired_stubborn)
 
-    assert paired_stubborn.correction_turn_delta is None
-    assert paired_good.baseline.success and paired_good.assisted.success
-    assert paired_good.assisted.first_pass_success
-    assert paired_good.correction_turn_delta is not None
-    assert paired_good.correction_turn_delta >= 1
-    # Wrong recommendation must be allowed to hurt the assisted arm.
-    assert paired_bad.assisted.attempts_used >= paired_good.assisted.attempts_used
+    assert paired_positive.baseline.success
+    assert paired_positive.assisted.success
+    assert paired_positive.baseline.correction_turns == 1
+    assert paired_positive.assisted.correction_turns == 0
+    assert paired_positive.correction_turn_delta == 1
 
-    print("mock E022 checks passed")
+    assert not paired_stubborn.baseline.success
+    assert not paired_stubborn.assisted.success
+    assert paired_stubborn.correction_turn_delta is None
+
+    print("E021 companion mock checks passed")
 
 
 if __name__ == "__main__":
