@@ -1,0 +1,90 @@
+name: hard-mask-census-v2
+
+on:
+  push:
+    branches: ["analysis/hard-mask-census-v2"]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project
+        run: python -m pip install -e . --no-deps
+      - name: Clone repositories
+        run: |
+          mkdir -p /tmp/census
+          git clone --depth 1 https://github.com/psf/requests.git /tmp/census/requests
+          git clone --depth 1 https://github.com/pallets/click.git /tmp/census/click
+          git clone --depth 1 https://github.com/encode/httpx.git /tmp/census/httpx
+          git clone --depth 1 https://github.com/fastapi/fastapi.git /tmp/census/fastapi
+          git clone --depth 1 https://github.com/pydantic/pydantic.git /tmp/census/pydantic
+      - name: Measure hardened task
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          from cdm.repository import (
+              namespace_repository_examples,
+              repository_hard_masked_call_examples,
+              split_repository_examples_balanced,
+          )
+
+          roots = {
+              "requests": Path("/tmp/census/requests"),
+              "click": Path("/tmp/census/click"),
+              "httpx": Path("/tmp/census/httpx"),
+              "fastapi": Path("/tmp/census/fastapi"),
+              "pydantic": Path("/tmp/census/pydantic"),
+          }
+
+          report = {}
+          pooled8 = []
+          for name, root in roots.items():
+              report[name] = {}
+              for k in (4, 8):
+                  examples = repository_hard_masked_call_examples(
+                      root,
+                      candidate_count=k,
+                      candidate_body_chars=512,
+                      seed=0,
+                  )
+                  report[name][str(k)] = {
+                      "examples": len(examples),
+                      "sources": len({e.source for e in examples}),
+                      "answer_positions": sorted({e.answer_index for e in examples}),
+                  }
+                  if k == 8:
+                      pooled8.extend(namespace_repository_examples(examples, name))
+
+          dataset = split_repository_examples_balanced(
+              pooled8,
+              seed=0,
+              train_fraction=0.70,
+              validation_fraction=0.15,
+          )
+
+          def by_repo(examples):
+              return dict(sorted(Counter(e.source.split("::", 1)[0] for e in examples).items()))
+
+          report["pooled8"] = {
+              "examples": len(pooled8),
+              "sources": len({e.source for e in pooled8}),
+              "train": len(dataset.train),
+              "validation": len(dataset.validation),
+              "test": len(dataset.test),
+              "train_by_repo": by_repo(dataset.train),
+              "validation_by_repo": by_repo(dataset.validation),
+              "test_by_repo": by_repo(dataset.test),
+          }
+          print("HARD_CENSUS_V2_JSON=" + json.dumps(report, sort_keys=True))
+          PY
