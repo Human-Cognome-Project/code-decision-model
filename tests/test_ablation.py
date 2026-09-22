@@ -87,3 +87,31 @@ def test_ablation_rejects_wrong_task():
         assert "hard masked-call" in str(exc)
     else:
         raise AssertionError("expected task validation")
+
+
+def test_candidate_ablation_accepts_syntactically_truncated_body():
+    example = DecisionExample(
+        context="def caller(x):\n    return __CALL_TARGET__(x)",
+        question="q",
+        candidates=(
+            "target(x)\ndef target(x):\n    value = helper(\n",
+            "other(x)\ndef other(x):\n    return x",
+        ),
+        answer_index=0,
+        task="python.hard_masked_direct_call",
+        source="repo::module.py",
+    )
+
+    masked = ablate_hard_call_identifiers(
+        example,
+        caller=False,
+        candidates=True,
+    )
+
+    assert masked.candidates[0] == (
+        "__CANDIDATE__(x)\ndef __CANDIDATE__(x):\n"
+        "    value = helper(\n"
+    )
+    assert masked.candidates[1] == (
+        "__CANDIDATE__(x)\ndef __CANDIDATE__(x):\n    return x"
+    )
