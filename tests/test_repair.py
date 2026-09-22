@@ -104,6 +104,14 @@ def test_wrong_target_and_unrelated_changes_fail():
     assert verify_repair(example, changed).reason == "unrelated_change"
 
 
+
+def test_extra_module_statements_are_rejected():
+    example = _function_example()
+    expected = expected_repair_source(example)
+    generated = "helper = 1" + chr(10) + expected
+
+    assert verify_repair(example, generated).reason == "invalid_python"
+
 def test_feedback_does_not_reveal_correct_candidate():
     example = _function_example()
     result = verify_repair(
