@@ -19,7 +19,7 @@ _SUPPORTED_TASKS = frozenset({
 
 # Accept only a structured selection such as "3", "candidate 3", or "Candidate 3:".
 _INDEX_PATTERN = re.compile(
-    r"(?:candidate\\s*)?(\\d+)\\s*(?:[:.\\)]?)",
+    r"(?:candidate\s*)?(\d+)\s*(?:[:.\)]?)",
     re.IGNORECASE,
 )
 
