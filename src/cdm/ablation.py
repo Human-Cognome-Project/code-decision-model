@@ -82,10 +82,19 @@ def ablate_hard_call_identifiers(
     if candidates:
         out = []
         for candidate in example.candidates:
-            if "\n" not in candidate:
+            signature = candidate.split("\n", 1)[0]
+            if "(" not in signature:
                 raise ValueError("expected candidate signature followed by function body")
-            _, body = candidate.split("\n", 1)
-            out.append(_rename_outer_function(body, "__CANDIDATE__"))
+            own_name = signature.split("(", 1)[0].strip()
+            if not own_name:
+                raise ValueError("candidate function name is empty")
+            out.append(
+                re.sub(
+                    rf"\b{re.escape(own_name)}\b",
+                    "__CANDIDATE__",
+                    candidate,
+                )
+            )
         transformed = tuple(out)
 
     return replace(
