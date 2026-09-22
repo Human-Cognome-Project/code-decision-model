@@ -84,3 +84,16 @@ Census:
 ```bash
 python examples/census_call_site_predicate.py
 ```
+
+
+## E023 — Structured-edit corrective turns
+
+See [E023_STRUCTURED_EDIT.md](E023_STRUCTURED_EDIT.md).
+
+Removes full-function generation. The generator emits only a candidate index;
+deterministic code applies the edit. Measures whether fallible decision evidence
+reduces wrong-selection correction turns.
+
+The 12-task live pilot improved first-pass success from 2/12 to 7/12 and success
+within two attempts from 5/12 to 8/12. This is a promising pilot and requires a
+larger confirmatory held-out run.
