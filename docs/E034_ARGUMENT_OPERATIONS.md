@@ -119,10 +119,11 @@ be reported against this baseline, not against chance.
 Reading: bindability prunes the plan space by roughly an order of magnitude
 but almost never resolves a decision on its own. On the same-file family it
 usually leaves exactly one binding plan per candidate; on the cross-file family
-it does so for about a third, and there a further fifth of decisions have a
-candidate with several binding plans or none. The gap between the last two
-columns is the number of decisions the earlier draft of this note would have
-over-credited as pure selection. The four method-call decisions all bind every
+it does so for about a third, and most of the remainder leave some candidate
+with several binding plans. The gap between the last two columns (2 same-file,
+4 cross-file) is decisions where a candidate has no binding plan at all; the
+earlier draft of this note over-credited those as pure selection. The four
+method-call decisions all bind every
 plan because E024 accepts either the bound or the static reading for receiver
 calls; they are too few to matter.
 
