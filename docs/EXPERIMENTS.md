@@ -233,8 +233,7 @@ See [E033_CALL_INTENT.md](E033_CALL_INTENT.md).
 First structured edit richer than an index: the generator emits one Python call
 expression, deterministic code splices it into the caller, and a four-stage
 verifier (parse, candidate membership, E024 bindability, AST equivalence)
-judges it with category-only feedback. Opens the question of whether a compact
-generator can write real code under hard predicates.
+judges it with category-only feedback.
 
 Mock and census:
 
@@ -242,3 +241,16 @@ Mock and census:
 python examples/run_call_intent_mock.py
 python examples/census_call_intent.py
 ```
+
+### E033 validity pilot
+
+See [E033_CALL_INTENT_VALIDITY_RESULT.md](E033_CALL_INTENT_VALIDITY_RESULT.md).
+
+A baseline-only, first-pass, 64-task pilot established the generation floor
+before any paired experiment. The pinned Qwen 0.5B generator produced a
+parseable call on 36/64 tasks (56.3%), a uniquely resolved and bindable call on
+23/64 (35.9%), and the exact machine-labelled repair on only 2/64 (3.1%).
+The invalid outputs were mostly genuine generation failures rather than harmless
+formatting. E033 therefore stops at the validity gate for this generator and
+surface; do not rescue it with permissive deterministic reconstruction of
+missing calls or arguments.
