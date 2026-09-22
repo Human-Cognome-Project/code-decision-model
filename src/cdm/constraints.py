@@ -2,7 +2,7 @@
 
 Unique priors belong outside the neural model as machine-checkable constraints.
 This module provides a minimal interface so deterministic validators can veto or
-re-rank candidates after the discriminative scorer has produced logits.
+filter candidates after the discriminative scorer has produced logits.
 
 The neural scores remain untouched; constraints only decide which candidates are
 still legal and how the final distribution is formed from the surviving set.
@@ -40,8 +40,10 @@ class ConstraintResult:
 class Constraint(Protocol):
     """Deterministic check over a decision instance.
 
-    Implementations must be pure with respect to the supplied strings; they may
-    not consult the neural model or any external LLM.
+    Implementations must be deterministic for the supplied decision and any
+    machine-checkable state captured by the constraint object. They may consume
+    precomputed facts from parsers, type checkers, tests, or other deterministic
+    tools, but must not consult the neural model or any external LLM.
     """
 
     def check(
