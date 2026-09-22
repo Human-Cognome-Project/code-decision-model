@@ -222,6 +222,9 @@ jobs:
               return "\n\n".join(blocks)
 
           def correction_prompt(example, rejected, recommendation):
+              # The E029 control prompt is the exact prefix. E032 changes only one
+              # thing: append the next feasible recommendation *after* the old
+              # feedback, so "That candidate" cannot refer to the new evidence.
               active = [i for i in range(len(example.candidates)) if i != rejected]
               allowed_numbers = ", ".join(str(i + 1) for i in active)
               blocks = [
@@ -231,11 +234,6 @@ jobs:
               ]
               for i in active:
                   blocks.append(f"Candidate {i + 1}:\n{example.candidates[i]}")
-              if recommendation is not None:
-                  blocks.append(
-                      "Repository decision evidence (fallible): "
-                      f"candidate {recommendation + 1} is recommended."
-                  )
               blocks.append(
                   "That candidate violates the repository constraint. "
                   "Choose another candidate number."
@@ -244,6 +242,12 @@ jobs:
                   f"Candidate {rejected + 1} was rejected by the deterministic verifier "
                   "and is no longer eligible."
               )
+              if recommendation is not None:
+                  blocks.append(
+                      "Repository decision evidence for this revised choice (fallible): "
+                      f"candidate {recommendation + 1} is recommended. "
+                      "Use this as evidence for the new choice, but still verify it against the code."
+                  )
               return "\n\n".join(blocks)
 
           choice_re = re.compile(
@@ -301,12 +305,19 @@ jobs:
                   None,
               )
 
-              memory = generate_choice(
-                  correction_prompt(example, first_rec, recommendation=None)
+              memory_prompt_text = correction_prompt(
+                  example, first_rec, recommendation=None
               )
-              ranked = generate_choice(
-                  correction_prompt(example, first_rec, recommendation=next_rec)
+              ranked_prompt_text = correction_prompt(
+                  example, first_rec, recommendation=next_rec
               )
+              if next_rec is not None and not ranked_prompt_text.startswith(
+                  memory_prompt_text + "\n\nRepository decision evidence for this revised choice"
+              ):
+                  raise RuntimeError("ranked prompt no longer preserves E029 control prefix")
+
+              memory = generate_choice(memory_prompt_text)
+              ranked = generate_choice(ranked_prompt_text)
               memory["correct"] = memory["parsed"] == example.answer_index
               ranked["correct"] = ranked["parsed"] == example.answer_index
               ranked["followed_recommendation"] = (
