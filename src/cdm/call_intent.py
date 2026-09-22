@@ -10,7 +10,7 @@ The output is a real code fragment, so three deterministic checks apply before
 any comparison with the machine-labelled repair:
 
 1. it must parse as a single call expression;
-2. its callee must name one of the candidates;
+2. its callee must name exactly one candidate (never resolved via the label);
 3. it must be bindable against that candidate's real signature (E024).
 
 Only then is the spliced caller compared, AST to AST, with the E021 expected
@@ -126,15 +126,17 @@ def intent_callee(call: ast.Call) -> str:
     return call.func.id if isinstance(call.func, ast.Name) else call.func.attr
 
 
-def candidate_index_for(example: DecisionExample, callee: str) -> int | None:
-    """Candidate whose symbol matches the callee; the answer wins a name tie."""
-    matches = [
+def candidate_indices_for(example: DecisionExample, callee: str) -> tuple[int, ...]:
+    """Every candidate whose symbol equals the callee, in candidate order.
+
+    Resolution never consults the label. Repository-wide pools (E030) do not
+    guarantee unique symbol names, so a callee can match zero, one, or several
+    candidates; the verifier treats anything but exactly one as a failure.
+    """
+    return tuple(
         index for index, candidate in enumerate(example.candidates)
         if candidate_symbol(candidate) == callee
-    ]
-    if not matches:
-        return None
-    return example.answer_index if example.answer_index in matches else matches[0]
+    )
 
 
 class _SpliceIntent(ast.NodeTransformer):
@@ -170,9 +172,12 @@ def verify_call_intent(
     if call is None:
         return CallIntentVerification(False, "invalid_call_expression")
 
-    index = candidate_index_for(example, intent_callee(call))
-    if index is None:
+    matches = candidate_indices_for(example, intent_callee(call))
+    if not matches:
         return CallIntentVerification(False, "unknown_target")
+    if len(matches) > 1:
+        return CallIntentVerification(False, "ambiguous_target")
+    index = matches[0]
 
     parameters = candidate_parameters(example.candidates[index])
     if parameters is not None:
@@ -203,6 +208,10 @@ def feedback_for_call_intent(verification: CallIntentVerification) -> str:
         "unknown_target": (
             "The callee is not one of the candidates. Call one of the candidate "
             "definitions by its exact name."
+        ),
+        "ambiguous_target": (
+            "The callee name matches more than one candidate, so the call does "
+            "not identify a single definition."
         ),
         "unbindable_call": (
             "The arguments cannot bind that candidate's signature. Match the "

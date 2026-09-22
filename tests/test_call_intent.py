@@ -7,6 +7,7 @@ import pytest
 
 from cdm.call_intent import (
     apply_call_intent,
+    candidate_indices_for,
     build_call_intent_prompt,
     eligible,
     feedback_for_call_intent,
@@ -203,3 +204,62 @@ def test_eligibility_census_on_this_repository():
         target = candidate_symbol(example.candidates[example.answer_index])
         intent = source.replace("__CALL_TARGET__", target)
         assert verify_call_intent(example, intent).valid, (example.source, intent)
+
+
+def _duplicate_pool_example(answer_index: int) -> DecisionExample:
+    """Cross-file-shaped pool: two candidates share the symbol `load`."""
+    return DecisionExample(
+        context="def run(v):\n    handle = open(v)\n    return __CALL_TARGET__(handle)\n",
+        question="q",
+        candidates=(
+            "load(x)\ndef load(x):\n    return x.read()\n",
+            "parse(x)\ndef parse(x):\n    return int(x)\n",
+            "load(x)\ndef load(x):\n    return x.readlines()\n",
+            "emit(x)\ndef emit(x):\n    return str(x)\n",
+        ),
+        answer_index=answer_index,
+        task="python.hard_masked_cross_file_call",
+        source="repo::pkg/user.py",
+    )
+
+
+def test_duplicate_callee_names_are_ambiguous_and_label_independent():
+    first = _duplicate_pool_example(answer_index=0)
+    third = _duplicate_pool_example(answer_index=2)
+
+    assert candidate_indices_for(first, "load") == (0, 2)
+    assert candidate_indices_for(first, "parse") == (1,)
+    assert candidate_indices_for(first, "nope") == ()
+
+    for example in (first, third):
+        result = verify_call_intent(example, "load(handle)")
+        assert not result.valid
+        assert result.reason == "ambiguous_target"
+        assert result.target_index is None
+    # Swapping which duplicate is the answer changes nothing about the verdict.
+    assert verify_call_intent(first, "load(handle)") == verify_call_intent(third, "load(handle)")
+
+    # A unique negative still resolves and is judged on its merits.
+    assert verify_call_intent(first, "parse(handle)").reason == "wrong_target"
+    assert verify_call_intent(first, "nope(handle)").reason == "unknown_target"
+
+    feedback = feedback_for_call_intent(verify_call_intent(first, "load(handle)"))
+    assert "candidate 1" not in feedback.lower() and "candidate 3" not in feedback.lower()
+    assert "readlines" not in feedback and "read()" not in feedback
+
+
+def test_duplicate_negative_does_not_block_a_unique_answer():
+    example = DecisionExample(
+        context="def run(v):\n    return __CALL_TARGET__(v)\n",
+        question="q",
+        candidates=(
+            "parse(x)\ndef parse(x):\n    return int(x)\n",
+            "load(x)\ndef load(x):\n    return x.read()\n",
+            "load(x)\ndef load(x):\n    return x.readlines()\n",
+        ),
+        answer_index=0,
+        task="python.hard_masked_cross_file_call",
+        source="repo::pkg/user.py",
+    )
+    assert verify_call_intent(example, "parse(v)").valid
+    assert verify_call_intent(example, "load(v)").reason == "ambiguous_target"

@@ -19,6 +19,7 @@ from collections import Counter
 from pathlib import Path
 
 from cdm.call_intent import eligible, masked_call_source
+from cdm.repair import candidate_symbol
 from cdm.crossfile import repository_hard_masked_cross_file_call_examples
 from cdm.methods import repository_hard_masked_method_call_examples
 from cdm.repository import repository_hard_masked_call_examples
@@ -35,6 +36,12 @@ def report(label: str, examples) -> None:
     print(f"decisions:              {len(examples)}")
     if examples:
         print(f"single call site:       {len(ok)} ({100.0 * len(ok) / len(examples):.1f}%)")
+    duplicated = sum(
+        sum(candidate_symbol(c) == candidate_symbol(e.candidates[e.answer_index]) for c in e.candidates) > 1
+        for e in ok
+    )
+    if ok:
+        print(f"answer name duplicated:  {duplicated} (unwinnable by name)")
     counts = Counter(_argument_count(masked_call_source(e)) for e in ok)
     if counts:
         dist = ", ".join(f"{k} args: {v}" for k, v in sorted(counts.items()))

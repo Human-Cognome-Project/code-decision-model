@@ -27,7 +27,7 @@ and feedback names only the failing category:
 | Check | Failure category | What it enforces |
 | --- | --- | --- |
 | parses as exactly one call expression | `invalid_call_expression` | output is code, not prose or a function |
-| callee names a candidate | `unknown_target` | the choice is drawn from the repository's real symbols |
+| callee names exactly one candidate | `unknown_target` / `ambiguous_target` | the choice is drawn from the repository's real symbols and identifies a single definition |
 | arguments bind the candidate's signature (E024) | `unbindable_call` | the call would not raise `TypeError` against the real definition |
 | spliced caller equals the expected repair | `wrong_target` / `wrong_arguments` | the right callee, and the original call site's arguments preserved |
 
@@ -36,6 +36,12 @@ predicates": a call that names the right candidate with arguments that cannot
 bind is rejected before any truth comparison, on the strength of the AST alone.
 `wrong_arguments` is reported only when the callee is right, so the two failure
 modes E022 conflated (wrong choice vs malformed edit) are separable.
+
+Callee resolution never consults the label. Repository-wide pools (E030) do not
+guarantee unique symbol names, so a call whose callee matches several candidates
+is rejected as `ambiguous_target` rather than credited to whichever duplicate is
+correct. A task whose answer symbol is duplicated in its own pool is therefore
+unwinnable under this protocol; the census reports how many such tasks exist.
 
 ## Task scope
 
