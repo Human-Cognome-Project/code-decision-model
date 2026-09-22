@@ -8,6 +8,10 @@ from .synthetic import DecisionExample
 
 
 _DEF = re.compile(r"^\s*(?:async\s+def|def)\s+")
+_HARD_MASKED_CALL_TASKS = frozenset({
+    "python.hard_masked_direct_call",
+    "python.hard_masked_same_class_call",
+})
 
 
 def focus_hard_call_context(
@@ -18,10 +22,10 @@ def focus_hard_call_context(
 ) -> DecisionExample:
     """Keep the function header and a local line window around the masked call site.
 
-    This transform is intended for hard masked-call examples. It never changes the
-    candidate set or answer. Short contexts are returned unchanged.
+    This transform is intended for hardened masked function- or method-call examples.
+    It never changes the candidate set or answer. Short contexts are returned unchanged.
     """
-    if example.task != "python.hard_masked_direct_call":
+    if example.task not in _HARD_MASKED_CALL_TASKS:
         raise ValueError("call-site focusing expects a hard masked-call example")
     if radius_lines < 0:
         raise ValueError("radius_lines must be non-negative")
