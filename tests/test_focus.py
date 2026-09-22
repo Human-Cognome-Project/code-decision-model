@@ -109,3 +109,29 @@ def test_focus_validates_task_radius_and_marker():
         assert "radius_lines" in str(exc)
     else:
         raise AssertionError("expected radius validation")
+
+
+def test_focus_supports_hard_masked_method_calls():
+    example = DecisionExample(
+        context="""def caller(self, x):
+    a = x + 1
+    b = a + 1
+    value = self.__CALL_TARGET__(b)
+    c = value + 1
+    return c
+""",
+        question="Which candidate method replaces __CALL_TARGET__?",
+        candidates=("target(self, x)", "other(self, x)"),
+        answer_index=0,
+        task="python.hard_masked_same_class_call",
+        source="repo::module.py",
+    )
+
+    focused = focus_hard_call_context(example, radius_lines=0)
+
+    assert focused.context.startswith("def caller(self, x):")
+    assert "self.__CALL_TARGET__(b)" in focused.context
+    assert "a = x + 1" not in focused.context
+    assert "return c" not in focused.context
+    assert focused.candidates == example.candidates
+    assert focused.answer_index == example.answer_index
