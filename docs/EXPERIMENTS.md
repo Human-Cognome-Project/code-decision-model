@@ -164,4 +164,4 @@ The preserved E027 task records show that the assisted generator followed the de
 
 See [E029_REJECTION_MEMORY.md](E029_REJECTION_MEMORY.md).
 
-Motivated by E028: after the deterministic verifier rejects a candidate, remove that candidate from the next-turn choice set and remove any recommendation pointing to it. The first-turn prompt remains exactly frozen. The experiment asks whether this hard correction-memory rule improves two-attempt success on wrong-recommendation tasks.
+Motivated by E028: after the deterministic verifier rejects a candidate, remove that candidate from the next-turn choice set and remove any recommendation pointing to it. The intervention begins only after deterministic rejection; the live run preserves the exact historical E027 first-turn prompt. The experiment asks whether this hard correction-memory rule improves two-attempt success on wrong-recommendation tasks.
