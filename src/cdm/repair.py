@@ -117,14 +117,12 @@ class _ResolveMarker(ast.NodeTransformer):
 
 def _parsed_function(source: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
     tree = ast.parse(source)
-    functions = [
-        node
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    ]
-    if len(functions) != 1:
-        raise ValueError("repair source must contain exactly one top-level function")
-    return functions[0]
+    if len(tree.body) != 1 or not isinstance(
+        tree.body[0],
+        (ast.FunctionDef, ast.AsyncFunctionDef),
+    ):
+        raise ValueError("repair source must contain only one top-level function")
+    return tree.body[0]
 
 
 def expected_repair_source(example: DecisionExample) -> str:
