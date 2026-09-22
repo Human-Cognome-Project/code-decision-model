@@ -51,6 +51,17 @@ do worse than baseline; the harness does not assume benefit.
   - terminal failure rate
   - breakdown by repository and function-vs-method task
 
+## Adapter scaffolding
+
+- `cdm.hf_generator.HFCausalRepairGenerator` — optional Hugging Face causal LM
+  adapter implementing `RepairGenerator`. Loads only when constructed without
+  injected tokenizer/model; requires `pip install -e ".[hf]"`.
+- `examples/run_corrective_turn_hf_smoke.py` — optional single-example smoke
+  (downloads weights; not part of default CI).
+- Unit tests inject fakes; no network in `pytest`.
+
+Default smoke pin matches the completed live pilot: `Qwen/Qwen2.5-Coder-0.5B-Instruct` at revision `ea3f2471cf1b1f0db85067f1ef93848e38e88c25`. The adapter uses the model chat template and a strict repair-only system instruction.
+
 ## Out of scope for E022
 
 - Expanding the generator or decision head before the measurement exists.
