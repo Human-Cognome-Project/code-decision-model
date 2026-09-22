@@ -10,6 +10,15 @@ from .text import HashTextEncoder
 from .unixcoder import UniXcoderEncoder
 from .coderank import CodeRankEncoder
 from .potion import PotionCodeEncoder
+from .constraints import (
+    AllAllowed,
+    ConstrainedDecision,
+    Constraint,
+    ConstraintResult,
+    RejectSubstring,
+    RequireSubstring,
+    apply_constraints,
+)
 
 __all__ = [
     "CodeDecisionModel",
@@ -20,4 +29,11 @@ __all__ = [
     "UniXcoderEncoder",
     "CodeRankEncoder",
     "PotionCodeEncoder",
+    "AllAllowed",
+    "ConstrainedDecision",
+    "Constraint",
+    "ConstraintResult",
+    "RejectSubstring",
+    "RequireSubstring",
+    "apply_constraints",
 ]
