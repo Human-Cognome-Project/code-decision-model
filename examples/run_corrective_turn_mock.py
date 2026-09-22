@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """E022 mock: exercise the corrective-turn harness without a real generator.
 
-Two deterministic generators demonstrate the measurement contract:
+Deterministic generators demonstrate the measurement contract:
 
-- oracle_after_feedback: fails first attempt, then emits the true repair.
+- recommendation_follower: uses a recommended candidate on the first attempt
+  when present; otherwise fails once and recovers from verifier feedback.
 - stubborn_wrong: always emits a valid but incorrect candidate.
 
 Run:
@@ -12,12 +13,19 @@ Run:
 """
 from __future__ import annotations
 
+import re
+
 from cdm.repair import (
     candidate_symbol,
     expected_repair_source,
     run_paired_repair,
 )
 from cdm.synthetic import DecisionExample
+
+_RECOMMENDATION = re.compile(
+    r"candidate (\d+) is recommended",
+    re.IGNORECASE,
+)
 
 
 def _example() -> DecisionExample:
@@ -43,16 +51,29 @@ def parse(value):
     )
 
 
-def _oracle_after_feedback_factory(example: DecisionExample):
-    """Fail once, then return the exact expected repair (uses feedback presence)."""
+def _repair_with(example: DecisionExample, candidate_index: int) -> str:
+    name = candidate_symbol(example.candidates[candidate_index])
+    return example.context.replace("__CALL_TARGET__", name)
+
+
+def _recommendation_follower_factory(example: DecisionExample):
+    """Prefer a stated recommendation; otherwise recover after feedback."""
+
     expected = expected_repair_source(example)
-    state = {"seen_feedback": False}
+    true_index = example.answer_index
 
     def generate(prompt: str) -> str:
+        match = _RECOMMENDATION.search(prompt)
+        if match is not None:
+            # Trust the fallible recommendation on the first pass.
+            index = int(match.group(1)) - 1
+            if 0 <= index < len(example.candidates):
+                return _repair_with(example, index)
+
         if "Deterministic verifier feedback:" in prompt:
-            state["seen_feedback"] = True
             return expected
-        # First attempt: leave the placeholder so the verifier rejects it.
+
+        # No recommendation and no feedback yet: leave the placeholder.
         return example.context
 
     return generate
@@ -61,9 +82,7 @@ def _oracle_after_feedback_factory(example: DecisionExample):
 def _stubborn_wrong_factory(example: DecisionExample):
     """Always emit a wrong but syntactically valid repair."""
     wrong_index = 1 if example.answer_index == 0 else 0
-    wrong_name = candidate_symbol(example.candidates[wrong_index])
-    # Build a minimal wrong repair by swapping the marker for the wrong symbol.
-    wrong_source = example.context.replace("__CALL_TARGET__", wrong_name)
+    wrong_source = _repair_with(example, wrong_index)
 
     def generate(prompt: str) -> str:
         return wrong_source
@@ -91,17 +110,27 @@ def _report(label: str, paired) -> None:
 def main() -> None:
     example = _example()
     true_index = example.answer_index
+    wrong_index = 1 if true_index == 0 else 0
 
-    # Positive case: recommendation is correct; oracle needs one correction.
-    paired_oracle = run_paired_repair(
+    # Correct recommendation: assisted should first-pass; baseline needs a correction.
+    paired_good = run_paired_repair(
         example,
-        lambda: _oracle_after_feedback_factory(example),
+        lambda: _recommendation_follower_factory(example),
         recommendation_index=true_index,
         max_attempts=3,
     )
-    _report("oracle_after_feedback (correct recommendation)", paired_oracle)
+    _report("recommendation_follower (correct recommendation)", paired_good)
 
-    # Negative case: both arms fail; delta must stay None.
+    # Wrong recommendation: assisted may be harmed; harness must still report honestly.
+    paired_bad = run_paired_repair(
+        example,
+        lambda: _recommendation_follower_factory(example),
+        recommendation_index=wrong_index,
+        max_attempts=3,
+    )
+    _report("recommendation_follower (wrong recommendation)", paired_bad)
+
+    # Both arms fail; delta must stay None.
     paired_stubborn = run_paired_repair(
         example,
         lambda: _stubborn_wrong_factory(example),
@@ -110,12 +139,13 @@ def main() -> None:
     )
     _report("stubborn_wrong (both fail)", paired_stubborn)
 
-    # Sanity: assisted should not invent a delta when neither succeeds.
     assert paired_stubborn.correction_turn_delta is None
-    # Oracle should succeed on both arms and show a non-negative delta.
-    assert paired_oracle.baseline.success and paired_oracle.assisted.success
-    assert paired_oracle.correction_turn_delta is not None
-    assert paired_oracle.correction_turn_delta >= 0
+    assert paired_good.baseline.success and paired_good.assisted.success
+    assert paired_good.assisted.first_pass_success
+    assert paired_good.correction_turn_delta is not None
+    assert paired_good.correction_turn_delta >= 1
+    # Wrong recommendation must be allowed to hurt the assisted arm.
+    assert paired_bad.assisted.attempts_used >= paired_good.assisted.attempts_used
 
     print("mock E022 checks passed")
 
