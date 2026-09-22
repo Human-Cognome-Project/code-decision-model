@@ -62,3 +62,17 @@ See [E022_OPEN_GENERATOR_REPAIR.md](E022_OPEN_GENERATOR_REPAIR.md).
 
 First live open-generator experiment on the E021 harness. Reserved for a pinned
 real model; the mock path lives under E021.
+
+## E023 — Call-site bindability predicate
+
+See [E023_CALL_SITE_PREDICATE.md](E023_CALL_SITE_PREDICATE.md).
+
+First hard constraint derived from AST facts rather than substrings. Measures
+what deterministic argument binding removes from masked-call decisions and
+asserts it never vetoes the machine-labelled target.
+
+Census:
+
+```bash
+python examples/census_call_site_predicate.py
+```
