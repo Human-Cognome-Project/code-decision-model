@@ -36,11 +36,11 @@ Run:
 python examples/learn_ast_calls.py
 ```
 
-## E018 — Hard environmental constraints
+## E019 — Hard environmental constraints
 
-See [E018_HARD_CONSTRAINTS.md](E018_HARD_CONSTRAINTS.md).
+See [E019_HARD_CONSTRAINTS.md](E019_HARD_CONSTRAINTS.md).
 
-Adds a minimal interface so deterministic validators can veto or re-rank
+Adds a minimal interface so deterministic validators can veto or filter
 candidates after neural scoring. Unique priors stay outside the model as
 machine-checkable constraints; an empty surviving set produces an explicit
 escalate signal.
