@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E023 census: what the call-site bindability predicate removes, and what it must not.
+"""E024 census: what the call-site bindability predicate removes, and what it must not.
 
 Runs the deterministic predicate over machine-labelled masked-call corpora built
 from a repository root and reports, per corpus:
