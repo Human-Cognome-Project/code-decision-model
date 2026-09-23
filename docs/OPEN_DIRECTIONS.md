@@ -76,9 +76,41 @@ index selection and would not be a valid rescue.
 
 Do not proceed to a full paired E033 run with this generator/prompt surface.
 
-A successor should constrain the action space structurally rather than rely on
-free-form call text. Useful possibilities include a narrow AST-operation schema
-that separates target choice from explicit argument operations.
+E034 tested that successor idea with a closed candidate-plus-one-operation
+language. It also failed the generation-validity gate for Qwen 0.5B, so do not
+continue narrowing schemas on this generator.
+
+## E034 — closed-vocabulary argument operations (stopped at validity gate)
+
+The preregistered baseline-only 64-task pilot produced:
+
+- syntax-valid plans: 11/64 (17.2%);
+- bindable edited calls: 2/64 (3.1%);
+- correct target: 1/64 (1.6%);
+- correct restoring operation: 0/64;
+- exact repairs: 0/64.
+
+All 64 model outputs anchored on candidate 1. Every parsed plan was exactly
+`candidate 1; keep`. Of the 53 invalid outputs, 45 copied or began reproducing
+candidate 1's signature/body instead of emitting a plan.
+
+The deterministic predicate did not solve the sample by itself (0/64), although
+29/64 tasks were pure-selection cases with exactly one binding plan per
+candidate. The generator still failed to express the required operation.
+
+This sharpens the current boundary for the pinned Qwen 0.5B model: candidate
+selection is reliable; generated edit intent is not, even under a closed
+single-operation vocabulary.
+
+Do not:
+
+- run a paired assisted E034 experiment with this generator;
+- prompt-tune on the 64 pilot tasks;
+- loosen or normalize the parser after seeing the outputs;
+- create another narrower edit schema for Qwen 0.5B.
+
+If structured edit intent is revisited, change the generator capability under a
+fresh preregistration instead of changing the task around this result.
 
 ## Second-generator replication
 
