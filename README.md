@@ -75,13 +75,13 @@ Independent replication is complete. Current work asks what parts of the mechani
 
 Three post-replication mechanism results now sharpen that question:
 
-- **E032 ranked re-recommendation:** on the original development repositories, replacing rejected evidence with the scorer's next feasible ranked recommendation improved success from 292/400 (73.0%) under E029 to 315/400 (78.75%). On wrong-first-recommendation tasks, recovery improved from 56/164 (34.1%) to 79/164 (48.2%), with exact McNemar p = 0.0128. This remains exploratory until the exact final intervention is replicated on the E031 independent repositories.
+- **E032/E035 ranked re-recommendation:** the development result improved wrong-recommendation recovery from 56/164 (34.1%) to 79/164 (48.2%). E035 then independently replicated the exact final intervention on the frozen E031 repositories: 62/177 (35.0%) under rejection memory versus 111/177 (62.7%) with ranked re-recommendation, +27.68 pp; exact McNemar p = 3.48e-7; clustered 95% CI +17.65 to +37.16 pp. Reconstructed overall success was 306/421 (72.7%) versus 355/421 (84.3%).
 - **E033 call-expression intent:** a baseline-only 64-task validity pilot reached only 23/64 uniquely resolved/bindable calls and 2/64 exact repairs. The free-form call-expression surface is stopped for the pinned 0.5B generator.
 - **E034 closed-vocabulary argument operations:** narrowing the output to one candidate plus one closed-vocabulary operation did not rescue Qwen 0.5B. Only 11/64 plans parsed, 2/64 were bindable, and 0/64 exactly repaired the call. All parsed plans were `candidate 1; keep`. Structured edit-intent generation is therefore stopped for this generator.
 
 Active directions include:
 
-- independent replication of the exact final E032 correction intervention on the E031 repository set;
+- replication of the frozen structured-selection and ranked-correction mechanisms with a second compact open generator;
 - a materially more capable generator, under fresh preregistration, if structured edit-intent generation is revisited;
 - replication with a second compact open generator;
 - harder cross-file/LSP/compiler/type-checker decision tasks;
