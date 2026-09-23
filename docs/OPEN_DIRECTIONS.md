@@ -126,9 +126,29 @@ second compact generator family, although SmolLM2 showed materially weaker
 first-turn recommendation following (181/421, 43.0%) and lower assisted
 first-turn parse validity (305/421, 72.4%) than the Qwen run.
 
-The next clean generator-dependence test is the E035 ranked-correction mechanism:
-preregister its unchanged transfer to SmolLM2 as E038. Do not tune E037 on these
-421 tasks before that test.
+E038 completed the next generator-dependence test; see below. Do not tune E037
+on these 421 tasks.
+
+## E038 — ranked correction transfer (completed)
+
+E038 conditioned on the 77 E037 tasks where SmolLM2 actually followed a wrong
+first recommendation and therefore entered the intended deterministic rejection
+state.
+
+- rejection-memory correction: 11/77 (14.3%);
+- ranked correction: 28/77 (36.4%);
+- delta: +22.08 pp;
+- exact McNemar p = 0.00232;
+- source-file-clustered 95% CI: +9.21 to +35.21 pp;
+- next feasible recommendation correct: 55/77 (71.4%);
+- ranked recommendation followed: 38/77 (49.4%).
+
+All three preregistered transfer gates passed. This extends the E032/E035
+post-rejection mechanism to a second compact generator family, conditional on
+the generator actually entering the rejected-recommendation state.
+
+Do not retune the SmolLM2 correction prompt, parser, eligibility filter, scorer,
+or feasibility rule on these 77 tasks.
 
 ## Harder deterministic decision types
 
@@ -161,11 +181,16 @@ Do not hide retrieval misses inside decision accuracy.
 
 E020 falsified raw Potion cosine margin as a useful general routing signal.
 
-More useful options include:
+E039 then tested the PairwiseMLP head's own raw top-class softmax probability.
+An E027-fitted threshold of 0.35 routed 385/421 E031 tasks to assistance and
+produced 289/421 successes versus 287/421 under always-assist. The +0.48 pp
+delta was not significant (McNemar p = 0.774; clustered 95% CI -1.45 to +2.26
+pp), so the preregistered gate failed.
 
-- calibrated decision-head confidence on unseen repositories;
-- agreement between independent hard constraints and neural ranking;
-- abstention evaluated without tuning on E027/E031 test repositories.
+Do not tune another top-softmax threshold or calibration transform on E031.
+Future escalation work should use a meaningfully different preregistered signal,
+for example agreement between independent hard constraints and neural ranking,
+and should preserve a genuinely untouched evaluation population.
 
 ## Leaner decision path
 
