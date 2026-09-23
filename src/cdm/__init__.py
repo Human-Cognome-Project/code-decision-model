@@ -60,6 +60,15 @@ from .plan_scoring import (
     run_plan_scoring_loop,
     top_candidate_histogram,
 )
+from .scope import (
+    InScopePool,
+    PoolCensus,
+    RepositoryScope,
+    in_scope_pools,
+    pool_census,
+    pool_example,
+    pool_examples,
+)
 from .call_intent import (
     CallIntentOutcome,
     CallIntentVerification,
@@ -125,6 +134,13 @@ __all__ = [
     "argument_repair_example",
     "argument_repair_examples",
     "corruption_is_label_invariant",
+    "InScopePool",
+    "PoolCensus",
+    "RepositoryScope",
+    "in_scope_pools",
+    "pool_census",
+    "pool_example",
+    "pool_examples",
     "ChanceBaselines",
     "ContinuationScore",
     "HFPlanScorer",

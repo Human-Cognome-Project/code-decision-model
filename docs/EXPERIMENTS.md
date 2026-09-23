@@ -394,3 +394,24 @@ top-class softmax probability. One threshold is selected on E027 from a fixed
 0.25-to-0.95 grid using preserved paired generator outcomes, then evaluated
 unchanged on preserved E031 paired outcomes. No generator is rerun and no E031
 outcome participates in threshold selection.
+
+## E040 — In-scope candidate pools
+
+See [E040_IN_SCOPE_POOLS.md](E040_IN_SCOPE_POOLS.md).
+
+The retrieval stage of OPEN_DIRECTIONS' two-stage path, measured without a
+model. For every hard same-file and cross-file task, `cdm.scope` builds the
+candidate pool a local assistant actually faces at two levels: everything in
+scope in the caller's file (module-level functions plus resolvable
+from-imports) and every top-level function in the repository. The census
+reports pool sizes, how far E024 bindability prunes each, how that compares
+with the extractor's shape-matched negatives, and whether the target is
+recovered (it must be; the test suite asserts it). `pool_example` re-poses any
+task over its bindable pool so the frozen scorer can be evaluated at pool
+scale.
+
+Census:
+
+```bash
+python examples/census_in_scope_pools.py
+```
