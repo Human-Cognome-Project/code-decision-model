@@ -28,7 +28,8 @@ The strongest completed evidence is now **E031**, the preregistered development-
 - **E029:** rejection memory reduced repeated rejected choices from 20 to 1 but changed success only from 289/400 to 292/400 (+0.75 pp; clustered 95% CI -0.96 to +2.32 pp). Treat this as a near-null end-to-end intervention.
 - **E030:** deterministic import-resolved cross-file supervision is available as a harder task family.
 - **E031:** on 421 tasks from AlphaFold, Pyodide, Optuna, and pytest, the frozen protocol improved success from 200/421 (47.5%) to 287/421 (68.2%), +20.67 pp; exact McNemar p = 1.29e-11; source-file clustered 95% CI +13.97 to +27.46 pp. The preregistered gate passed.
-- **E032:** the live ranked-memory correction test improved success from 292/400 (73.0%) under E029 to 315/400 (78.75%). On 164 wrong-first-recommendation tasks, correction success rose from 56/164 (34.1%) to 79/164 (48.2%), +14.02 pp; exact McNemar p = 0.0128; clustered 95% CI +2.07 to +25.49 pp. This remains exploratory development-set evidence; replicate the exact frozen intervention on the E031 independent repositories before generalizing it.
+- **E032:** on the development repositories, ranked re-recommendation improved correction recovery from 56/164 (34.1%) under E029 memory to 79/164 (48.2%), +14.02 pp.
+- **E035:** the exact final E032 intervention independently replicated on the frozen E031 repository set. On 177 wrong-first-recommendation tasks, correction recovery improved from 62/177 (35.0%) under E029 memory to 111/177 (62.7%), +27.68 pp; exact McNemar p = 3.48e-7; clustered 95% CI +17.65 to +37.16 pp. Reconstructed overall success was 306/421 (72.7%) vs 355/421 (84.3%). Treat ranked re-recommendation as an independently replicated mechanism on the structured-selection task.
 - **E033:** call-expression intent reached only 36/64 parse-valid calls, 23/64 uniquely resolved/bindable calls, and 2/64 exact repairs in a baseline-only validity pilot. Stop this free-form call surface for the 0.5B generator; do not rescue it with permissive deterministic reconstruction.
 - **E034:** the closed-vocabulary one-operation successor failed even earlier: 11/64 syntax-valid plans, 2/64 bindable plans, 0/64 correct operations, and 0/64 exact repairs. All 64 outputs anchored on candidate 1; all 11 parsed plans were `candidate 1; keep`. Stop structured edit-intent generation with the pinned Qwen 0.5B model. Do not prompt-tune, loosen the parser, or invent another schema on these 64 tasks.
 
@@ -40,7 +41,7 @@ See [docs/OPEN_DIRECTIONS.md](docs/OPEN_DIRECTIONS.md).
 
 Current high-value work includes:
 
-- replicate the exact final E032 ranked-correction intervention on the E031 independent repository set without retuning;
+- replicate the frozen structured-selection intervention and ranked-correction mechanism with a second compact open generator;
 - if structured edit-intent generation is revisited, use a materially more capable generator under a fresh preregistration; do not continue schema/prompt tuning with Qwen 0.5B;
 - replicate the frozen E031 intervention with a second compact open generator;
 - extend deterministic supervision to harder cross-file/LSP/compiler/type-checker tasks;
