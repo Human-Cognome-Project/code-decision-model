@@ -107,6 +107,26 @@ Do not:
 If structured edit intent is revisited, change the generator capability under a
 fresh preregistration instead of changing the task around this result.
 
+## E036 — canonical continuation likelihood (stopped)
+
+E036 tested the exact E034 64-task sample by scoring every admitted plan using
+the pinned Qwen model's canonical continuation likelihood under a frozen prompt
+token boundary.
+
+- uniform over E024-binding plans: 12.32/64 expected exact;
+- unrotated summed likelihood: 0/64;
+- four-way rotated summed likelihood: 10/64;
+- unrotated candidate-1 top-plan frequency: 64/64;
+- rotated top-candidate histogram: 13/13/18/20.
+
+Both primary summed-likelihood variants remained at or below the preregistered
+predicate-plus-uniform floor, so the stop condition fired and no paired assisted
+E036 run should occur.
+
+Feasible-only summed ranking reached 16/64 unrotated and 19/64 rotated, but this
+was a secondary diagnostic, not the continuation gate. Do not convert it into a
+post-hoc pass criterion. E036 was not exact grammar-constrained decoding.
+
 ## E037 — second-generator replication (completed)
 
 The frozen E031 structured-selection intervention was repeated with

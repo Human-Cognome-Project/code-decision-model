@@ -35,6 +35,7 @@ The completed confirmatory evidence now includes **E031**, the preregistered dev
 - **E039:** E027 selected top-softmax threshold 0.35. On E031 it produced 289/421 successes versus 287/421 for always-assist, +0.48 pp; p = 0.774; clustered 95% CI -1.45 to +2.26 pp. The preregistered gate failed. Stop raw top-softmax confidence as a success-improving first-turn router; do not retune threshold or transform on E031.
 - **E033:** call-expression intent reached only 36/64 parse-valid calls, 23/64 uniquely resolved/bindable calls, and 2/64 exact repairs in a baseline-only validity pilot. Stop this free-form call surface for the 0.5B generator; do not rescue it with permissive deterministic reconstruction.
 - **E034:** the closed-vocabulary one-operation successor failed even earlier: 11/64 syntax-valid plans, 2/64 bindable plans, 0/64 correct operations, and 0/64 exact repairs. All 64 outputs anchored on candidate 1; all 11 parsed plans were `candidate 1; keep`. Stop structured edit-intent generation with the pinned Qwen 0.5B model. Do not prompt-tune, loosen the parser, or invent another schema on these 64 tasks.
+- **E036:** canonical continuation likelihood on the exact 64 E034 tasks did not clear its baseline-only stop floor: 0/64 exact unrotated and 10/64 with cyclic rotation versus 12.32/64 expected under uniform choice over E024-binding plans. Do not run the paired assisted E036 arm or promote the 19/64 feasible-only secondary into a post-hoc gate. This was canonical one-tokenization-per-plan scoring, not exact constrained decoding.
 
 Do not reinterpret or retune E031 after seeing its result. Do not tune the four E027 repositories merely to improve reported historical numbers.
 
@@ -69,7 +70,8 @@ Current high-value work includes:
 - raw Potion-margin routing already falsified by E020;
 - raw PairwiseMLP top-softmax threshold routing already falsified as a transferable success-improving router by E039;
 - free-form repair generation without a deterministic measurement bridge;
-- further Qwen 0.5B prompt/schema tuning on the E033/E034 validity-pilot tasks.
+- further Qwen 0.5B prompt/schema tuning on the E033/E034 validity-pilot tasks;
+- paired E036 assistance or post-hoc gate changes on the frozen 64-task canonical-likelihood pilot.
 
 ## How to work
 

@@ -332,28 +332,25 @@ memory and 355/421 (84.3%) with ranked re-recommendation. This upgrades the E032
 mechanism from exploratory development evidence to an independently replicated
 structured-selection result.
 
-## E036 — Constrained plan scoring
+## E036 — Canonical continuation likelihood ranking
 
-See [E036_CONSTRAINED_PLAN_SCORING.md](E036_CONSTRAINED_PLAN_SCORING.md).
+See [E036_CONSTRAINED_PLAN_SCORING.md](E036_CONSTRAINED_PLAN_SCORING.md) and
+[E036_CANONICAL_LIKELIHOOD_RESULT.md](E036_CANONICAL_LIKELIHOOD_RESULT.md).
 
-E034 showed the pinned generator cannot *emit* a closed-vocabulary plan. E036
-asks whether it *knows* one: every plan in the E034 plan space is scored by the
-generator's log-probability of its canonical token sequence (the plan text
-tokenised on its own plus the end-of-turn token, after the frozen E034 prompt
-tokens) and the best-scoring plan is taken. This is canonical continuation
-likelihood ranking, not exact grammar-constrained decoding, which would sum
-over every tokenisation of a plan. Format validity is 100% by construction; the question
-becomes whether the likelihood ranks the restoring plan above chance and above
-the model-free predicate-plus-ranker baseline. Corrective turns are
-deterministic (drop the rejected plan, take the next). Label-free controls:
-length normalisation and cyclic candidate rotation, which cancels the
-candidate-1 position prior E034 exposed.
+The baseline-only 64-task pilot reached its preregistered stop condition.
+Uniform choice over E024-binding plans had an expected 12.32 exact tasks.
+Unrotated summed canonical likelihood was 0/64; four-way cyclic-rotation summed
+likelihood was 10/64. Both were at or below the predicate-plus-uniform floor, so
+no paired assisted E036 run is warranted.
 
-Mock (no download):
+The unrotated ranking put candidate 1 first on 64/64 tasks; rotation dispersed
+that position prior to a 13/13/18/20 candidate histogram. Secondary feasible-only
+summed ranking reached 16/64 unrotated and 19/64 rotated, but that diagnostic was
+not the preregistered continuation gate and must not be used post hoc to reopen
+the stopped run.
 
-```bash
-python examples/run_plan_scoring_mock.py
-```
+E036 remains canonical continuation likelihood ranking under a frozen prompt
+token boundary, not exact grammar-constrained decoding.
 
 ## E037 — Second-generator replication
 
