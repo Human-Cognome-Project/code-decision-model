@@ -332,11 +332,11 @@ memory and 355/421 (84.3%) with ranked re-recommendation. This upgrades the E032
 mechanism from exploratory development evidence to an independently replicated
 structured-selection result.
 
-## E035 — Constrained plan scoring
+## E036 — Constrained plan scoring
 
-See [E035_CONSTRAINED_PLAN_SCORING.md](E035_CONSTRAINED_PLAN_SCORING.md).
+See [E036_CONSTRAINED_PLAN_SCORING.md](E036_CONSTRAINED_PLAN_SCORING.md).
 
-E034 showed the pinned generator cannot *emit* a closed-vocabulary plan. E035
+E034 showed the pinned generator cannot *emit* a closed-vocabulary plan. E036
 asks whether it *knows* one: every plan in the E034 plan space is scored by the
 generator's log-probability (plan text plus end-of-turn token, given the
 unchanged E034 prompt) and the best-scoring plan is taken, which is exact

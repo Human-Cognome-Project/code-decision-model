@@ -1,4 +1,4 @@
-# E035 — Constrained plan scoring over the E034 plan space
+# E036 — Constrained plan scoring over the E034 plan space
 
 E034's preregistered validity pilot failed for the pinned Qwen 0.5B generator:
 11/64 outputs parsed as plans, all 11 were `candidate 1; keep`, 45/64 copied
@@ -8,10 +8,10 @@ selection, not generated edit intent", and that a future structured-edit
 experiment should change generator capability under a fresh preregistration
 rather than change the task around the result.
 
-E035 is that capability change, and it is the cheapest one available: the same
+E036 is that capability change, and it is the cheapest one available: the same
 weights, the same prompt, the same task, and a different decoder. It does not
 reopen E034's verdict. E034 measured whether the generator can *emit* a plan;
-E035 measures whether it *knows* one.
+E036 measures whether it *knows* one.
 
 ## Mechanism
 
@@ -100,10 +100,13 @@ reported against this row, not against uniform chance.
   `summarize_paired` (E026) unchanged.
 - `HFPlanScorer`: the pinned Qwen scorer. The prompt is rendered exactly as the
   E034 pilot rendered it (same system prompt, chat template, generation
-  prompt). Its key/value cache is computed once and copied per continuation, so
-  scoring `n` plans costs one prompt forward plus `n` short forwards; a
-  boundary merge in tokenisation falls back to one uncached forward with an
-  identical score. The end-of-turn token is appended as an id, not text.
+  prompt) and tokenised once; those ids are frozen, as they are in generation.
+  Each continuation's ids come from the continuation string alone (no special
+  tokens), must decode back to it, and are followed by the end-of-turn id. The
+  concatenated string is never retokenised, so a plan cannot retroactively
+  change the prompt's tokens. The prompt's key/value cache is computed once and
+  copied per continuation, so scoring `n` plans costs one prompt forward plus
+  `n` short forwards.
 - `chance_baselines`, `top_candidate_histogram`: the baselines and the
   position diagnostic above.
 
@@ -112,9 +115,11 @@ plan), the attractor reproduction, score ordering, normalisation, cancellation
 of a pure position preference under rotation and survival of a content
 preference for every answer index, the corrective loop and its E026 feed, the
 feasible-only restriction, the analytic baselines, and the HF scorer against an
-independent reference computation on a fake bigram model, on both the cached
-and the fallback path, with the cache call pattern asserted. No test downloads
-weights; the live smoke is `python examples/run_plan_scoring_mock.py --hf`.
+independent reference that starts from the already-tokenised prompt, including
+a tokenizer whose concatenated tokenisation merges across the prompt boundary,
+where the reference from `tokenizer(prompt + continuation)` is shown to differ
+and is not what the scorer computes. No test downloads weights; the live smoke
+is `python examples/run_plan_scoring_mock.py --hf`.
 
 ## What this tests, per the contribution rule
 
@@ -148,7 +153,8 @@ weights; the live smoke is `python examples/run_plan_scoring_mock.py --hf`.
 
 ## Out of scope
 
-E027, E031, and the E032 replication gate are untouched. E035 does not alter
+E027, E031, and E035 (the independent replication of E032 ranked
+re-recommendation, which has now completed) are untouched. E036 does not alter
 E034's stop decision, its parser, vocabulary, or prompt, and it does not tune
 anything on the 64 pilot tasks: the scorer sees the same prompt the pilot used,
 and the plan space it ranks is the one E034 already enumerates.
