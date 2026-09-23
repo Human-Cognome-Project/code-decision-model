@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""E035 mock: constrained plan scoring over the E034 plan space.
+"""E036 mock: constrained plan scoring over the E034 plan space.
 
-Runs the E035 loop on this repository's E034 tasks with three model-free
+Runs the E036 loop on this repository's E034 tasks with three model-free
 scorers, so the harness, the chance baselines, and the position-prior
 diagnostic can be checked without a model download:
 
@@ -128,7 +128,6 @@ def main(argv: list[str]) -> int:
         print(f"=== pinned Qwen scorer, first {len(subset)} tasks (smoke, not the pilot) ===")
         report("qwen, no shifts", subset, lambda item: scorer, shifts=1)
         report(f"qwen, {args.shifts} shifts", subset, lambda item: scorer, shifts=args.shifts)
-        print(f"uncached boundary fallbacks: {scorer.uncached_fallbacks}")
         return 0
 
     print("=== model-free scorers ===")
@@ -142,7 +141,7 @@ def main(argv: list[str]) -> int:
     report("oracle, no shifts", items, oracle)
     report(f"oracle, {args.shifts} shifts", items, oracle, shifts=args.shifts)
     print()
-    print("E035 mock checks: the constant scorer reproduces the attractor; under shifts a pure position preference\n"
+    print("E036 mock checks: the constant scorer reproduces the attractor; under shifts a pure position preference\n"
           "ties every plan and the rank falls back to plan-space order (still candidate 1); the oracle is credited.")
     return 0
 

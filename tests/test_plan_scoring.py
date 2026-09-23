@@ -1,4 +1,4 @@
-"""Tests for E035 constrained plan scoring."""
+"""Tests for E036 constrained plan scoring."""
 from __future__ import annotations
 
 import math
@@ -299,7 +299,12 @@ def test_top_candidate_histogram():
 
 
 class FakeTokenizer:
-    """Whitespace tokenizer over a fixed vocabulary; ids are stable per word."""
+    """Word tokenizer whose concatenated tokenisation can merge across a boundary.
+
+    Words are split on whitespace, so ``"ASSISTANT:" + "candidate"`` becomes
+    the single token ``"ASSISTANT:candidate"`` when tokenised as one string.
+    That is the boundary merge the scorer must never be exposed to.
+    """
 
     eos_token_id = 2
     eos_token = "<eos>"
@@ -308,15 +313,22 @@ class FakeTokenizer:
     def __init__(self, template_end: str = "\nASSISTANT:\n"):
         self.template_end = template_end
         self.vocab: dict[str, int] = {}
+        self.words: dict[int, str] = {}
+        self.special_token_calls: list[bool] = []
 
     def _id(self, word: str) -> int:
         if word not in self.vocab:
             self.vocab[word] = 3 + len(self.vocab)
+            self.words[self.vocab[word]] = word
         return self.vocab[word]
 
-    def __call__(self, text, return_tensors="pt"):
+    def __call__(self, text, return_tensors="pt", add_special_tokens=True):
+        self.special_token_calls.append(add_special_tokens)
         ids = [self._id(w) for w in re.findall(r"\S+|\n", text)]
         return {"input_ids": torch.tensor([ids], dtype=torch.long)}
+
+    def decode(self, ids, skip_special_tokens=True):
+        return " ".join(self.words[int(i)] for i in ids if int(i) in self.words)
 
     def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
         return "SYSTEM:" + messages[0]["content"] + "\nUSER:" + messages[1]["content"] + self.template_end
@@ -350,19 +362,28 @@ class BigramModel(nn.Module):
         return _Output(logits, _Cache(prior + input_ids.shape[-1]))
 
 
-def _reference(model, tokenizer, rendered, continuation):
-    prefix = tokenizer(rendered)["input_ids"][0].tolist()
+def _frozen_prompt_reference(model, tokenizer, rendered, continuation):
+    """log P(continuation ids + eos | frozen prompt ids): generation semantics."""
+    prompt = tokenizer(rendered)["input_ids"][0].tolist()
+    cont = tokenizer(continuation, add_special_tokens=False)["input_ids"][0].tolist() + [tokenizer.eos_token_id]
+    logp = torch.log_softmax(model.table, dim=-1)
+    sequence = prompt + cont
+    total = sum(float(logp[sequence[t - 1], sequence[t]]) for t in range(len(prompt), len(sequence)))
+    return total, len(cont)
+
+
+def _retokenised_string_reference(model, tokenizer, rendered, continuation):
+    """The semantics the reviewer rejected: retokenise prompt + continuation as one string."""
+    prompt = tokenizer(rendered)["input_ids"][0].tolist()
     full = tokenizer(rendered + continuation)["input_ids"][0].tolist() + [tokenizer.eos_token_id]
     common = 0
-    while common < min(len(full), len(prefix)) and full[common] == prefix[common]:
+    while common < min(len(full), len(prompt)) and full[common] == prompt[common]:
         common += 1
-    common = max(common, 1)
     logp = torch.log_softmax(model.table, dim=-1)
-    total = sum(float(logp[full[t - 1], full[t]]) for t in range(common, len(full)))
-    return total, len(full) - common
+    return sum(float(logp[full[t - 1], full[t]]) for t in range(max(common, 1), len(full)))
 
 
-def test_hf_scorer_matches_reference_on_cached_path():
+def test_hf_scorer_matches_frozen_prompt_reference():
     tokenizer, model = FakeTokenizer(), BigramModel()
     scorer = HFPlanScorer(tokenizer=tokenizer, model=model)
     item = _item()
@@ -371,31 +392,55 @@ def test_hf_scorer_matches_reference_on_cached_path():
     rendered = scorer.render_prompt(prompt)
     assert rendered.startswith("SYSTEM:You are a precise code repair engine.")
     scores = scorer(prompt, continuations)
-    assert scorer.uncached_fallbacks == 0
+    scorer_calls = list(tokenizer.special_token_calls)
     for continuation, score in zip(continuations, scores):
-        total, tokens = _reference(model, tokenizer, rendered, continuation)
+        total, tokens = _frozen_prompt_reference(model, tokenizer, rendered, continuation)
         assert score.log_probability == pytest.approx(total, abs=1e-5)
-        assert score.tokens == tokens
-        assert tokens == len(re.findall(r"\S+", continuation)) + 1  # plus end-of-turn
+        assert score.tokens == tokens == len(re.findall(r"\S+", continuation)) + 1  # plus end-of-turn
     # One prompt forward, then one short cached forward per continuation.
     assert model.calls[0][0] == 0
     prefix_len = model.calls[0][1]
     assert all(prior == prefix_len for prior, _ in model.calls[1:])
+    # The scorer tokenises the prompt once, with special tokens as the pilot
+    # did, then each continuation once, without them.
+    assert scorer_calls == [True] + [False] * len(continuations)
 
 
-def test_hf_scorer_falls_back_when_the_boundary_merges():
+def test_hf_scorer_never_retokenises_the_prompt_when_the_boundary_would_merge():
+    # The template ends without a newline, so tokenising prompt + continuation as
+    # one string merges "ASSISTANT:" with "candidate" and changes the prompt's
+    # last token. Generation cannot do that: the prompt ids are fixed first.
     tokenizer, model = FakeTokenizer(template_end="\nASSISTANT:"), BigramModel()
     scorer = HFPlanScorer(tokenizer=tokenizer, model=model)
     item = _item()
     prompt = build_argument_repair_prompt(item)
     continuations = [p.render() for p in plan_space(item)[:3]]
     rendered = scorer.render_prompt(prompt)
+    prompt_ids = tokenizer(rendered)["input_ids"][0].tolist()
+    for continuation in continuations:
+        merged = tokenizer(rendered + continuation)["input_ids"][0].tolist()
+        assert merged[: len(prompt_ids)] != prompt_ids  # the merge really happens
+    before = len(tokenizer.special_token_calls)
     scores = scorer(prompt, continuations)
-    assert scorer.uncached_fallbacks == len(continuations)
+    # The scorer tokenised the prompt once and each continuation once, alone:
+    # the concatenated string was never tokenised.
+    assert tokenizer.special_token_calls[before:] == [True] + [False] * len(continuations)
     for continuation, score in zip(continuations, scores):
-        total, tokens = _reference(model, tokenizer, rendered, continuation)
-        assert score.log_probability == pytest.approx(total, abs=1e-5)
+        frozen, tokens = _frozen_prompt_reference(model, tokenizer, rendered, continuation)
+        retokenised = _retokenised_string_reference(model, tokenizer, rendered, continuation)
+        assert score.log_probability == pytest.approx(frozen, abs=1e-5)
         assert score.tokens == tokens
+        assert score.log_probability != pytest.approx(retokenised, abs=1e-5)
+
+
+def test_hf_scorer_rejects_a_continuation_that_does_not_round_trip():
+    class LossyTokenizer(FakeTokenizer):
+        def decode(self, ids, skip_special_tokens=True):
+            return "something else"
+
+    scorer = HFPlanScorer(tokenizer=LossyTokenizer(), model=BigramModel())
+    with pytest.raises(ValueError, match="round-trip"):
+        scorer(build_argument_repair_prompt(_item()), ["candidate 1; keep"])
 
 
 def test_hf_scorer_end_to_end_ranking_is_deterministic_and_finite():

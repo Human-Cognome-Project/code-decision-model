@@ -1,4 +1,4 @@
-"""E035 constrained plan scoring over the E034 closed vocabulary.
+"""E036 constrained plan scoring over the E034 closed vocabulary.
 
 E034 stopped at its validity gate: asked to *emit* one plan from a closed
 vocabulary, the pinned 0.5B generator produced a valid plan on 11/64 tasks and
@@ -6,7 +6,7 @@ the correct one on none, collapsing onto ``candidate 1; keep`` or copying the
 first candidate. That result says the generator cannot emit the format. It does
 not say whether the generator *knows* the answer.
 
-E035 separates the two. The E034 plan space is finite and enumerable
+E036 separates the two. The E034 plan space is finite and enumerable
 (:func:`cdm.argument_ops.plan_space`), so instead of sampling text the
 generator scores every plan: the log-probability of the rendered plan, followed
 by the end-of-turn token, given the E034 prompt. The highest-scoring plan is the
@@ -325,9 +325,13 @@ class HFPlanScorer:
     end-of-turn token, so the score is the probability of emitting exactly that
     plan and stopping.
 
-    If a continuation does not tokenise as an extension of the prompt's token
-    sequence (a merge across the boundary), it is scored with one uncached
-    full forward instead; the score is identical, only slower.
+    Scoring is conditional on the *frozen* prompt token sequence, exactly as
+    generation is: the prompt is tokenised once, and each continuation's token
+    ids are produced from the continuation string alone (no special tokens)
+    and appended after that fixed boundary. The concatenated string is never
+    retokenised, so a continuation can never alter how the prompt was
+    tokenised. Each continuation's ids must decode back to its text; a
+    tokenizer that cannot round-trip a plan raises rather than mis-scoring it.
     """
 
     def __init__(
@@ -366,7 +370,6 @@ class HFPlanScorer:
         self.revision = revision
         self.system_prompt = system_prompt
         self.use_chat_template = use_chat_template
-        self.uncached_fallbacks = 0
 
     def render_prompt(self, prompt: str) -> str:
         if self.use_chat_template and hasattr(self.tokenizer, "apply_chat_template"):
@@ -384,9 +387,26 @@ class HFPlanScorer:
             return self.system_prompt + "\n\n" + prompt
         return prompt
 
-    def _ids(self, text: str) -> list[int]:
-        encoded = self.tokenizer(text, return_tensors="pt")
+    def _prompt_ids(self, rendered: str) -> list[int]:
+        """The prompt's token ids, tokenised exactly as the E034 pilot did."""
+        encoded = self.tokenizer(rendered, return_tensors="pt")
         return [int(i) for i in encoded["input_ids"][0]]
+
+    def continuation_ids(self, continuation: str) -> list[int]:
+        """Token ids the model would emit for ``continuation`` after the prompt.
+
+        Tokenised from the continuation string alone, with no special tokens,
+        then followed by the end-of-turn id. Independent of the prompt, so the
+        prompt's ids stay frozen. Raises ``ValueError`` if the ids do not
+        decode back to the continuation text.
+        """
+        encoded = self.tokenizer(continuation, return_tensors="pt", add_special_tokens=False)
+        ids = [int(i) for i in encoded["input_ids"][0]]
+        decoded = self.tokenizer.decode(ids, skip_special_tokens=True)
+        if decoded.strip() != continuation.strip():
+            raise ValueError(f"continuation does not round-trip through the tokenizer: {continuation!r} -> {decoded!r}")
+        end = self._end_token()
+        return ids + ([end] if end is not None else [])
 
     def _end_token(self) -> int | None:
         eos = getattr(self.tokenizer, "eos_token_id", None)
@@ -419,36 +439,20 @@ class HFPlanScorer:
 
     def __call__(self, prompt: str, continuations: Sequence[str]) -> list[ContinuationScore]:
         rendered = self.render_prompt(prompt)
-        prefix = self._ids(rendered)
-        end = self._end_token()
+        prefix = self._prompt_ids(rendered)
         prefix_out = self._forward(prefix, None)
         prefix_cache = prefix_out.past_key_values
         last_logit = prefix_out.logits[0, -1]
 
         scores: list[ContinuationScore] = []
         for continuation in continuations:
-            full = self._ids(rendered + continuation)
-            if end is not None:
-                full = full + [end]
-            if len(full) > len(prefix) and full[: len(prefix)] == prefix:
-                targets = full[len(prefix):]
-                # The first target is predicted by the prompt's last position;
-                # the rest by the continuation's own positions, fed with the cache.
-                total = self._sum_log_probs(last_logit.unsqueeze(0), targets[:1])
-                if len(targets) > 1:
-                    out = self._forward(targets[:-1], copy.deepcopy(prefix_cache))
-                    total += self._sum_log_probs(out.logits[0], targets[1:])
-                scores.append(ContinuationScore(total, len(targets)))
-                continue
-            # Boundary merge: score the whole sequence without the cache.
-            self.uncached_fallbacks += 1
-            common = 0
-            while common < min(len(full), len(prefix)) and full[common] == prefix[common]:
-                common += 1
-            common = max(common, 1)
-            out = self._forward(full[:-1], None)
-            targets = full[common:]
-            total = self._sum_log_probs(out.logits[0, common - 1 :], targets)
+            targets = self.continuation_ids(continuation)
+            # The first target is predicted by the prompt's last position; the
+            # rest by the continuation's own positions, fed with the prompt cache.
+            total = self._sum_log_probs(last_logit.unsqueeze(0), targets[:1])
+            if len(targets) > 1:
+                out = self._forward(targets[:-1], copy.deepcopy(prefix_cache))
+                total += self._sum_log_probs(out.logits[0], targets[1:])
             scores.append(ContinuationScore(total, len(targets)))
         return scores
 

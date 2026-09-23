@@ -310,11 +310,11 @@ paired assisted E034 experiment or tune the schema/prompt on these pilot tasks.
 A future edit-intent experiment should change generator capability under a
 fresh preregistration.
 
-## E035 — Constrained plan scoring
+## E036 — Constrained plan scoring
 
-See [E035_CONSTRAINED_PLAN_SCORING.md](E035_CONSTRAINED_PLAN_SCORING.md).
+See [E036_CONSTRAINED_PLAN_SCORING.md](E036_CONSTRAINED_PLAN_SCORING.md).
 
-E034 showed the pinned generator cannot *emit* a closed-vocabulary plan. E035
+E034 showed the pinned generator cannot *emit* a closed-vocabulary plan. E036
 asks whether it *knows* one: every plan in the E034 plan space is scored by the
 generator's log-probability (plan text plus end-of-turn token, given the
 unchanged E034 prompt) and the best-scoring plan is taken, which is exact
