@@ -344,7 +344,13 @@ def _stable_rng(*parts: object) -> random.Random:
 
 
 def _label_free_rng(purpose: str, seed: int, example: DecisionExample) -> random.Random:
-    """RNG seeded by everything visible in the prompt and nothing hidden."""
+    """RNG seeded by label-independent content only.
+
+    The seed material is the caller, the candidate tuple, the seed, and the
+    example's source path. The source path is not shown in the prompt but
+    is fixed before the answer is chosen, so it carries no label information.
+    ``answer_index`` is never part of the hash.
+    """
     return _stable_rng(purpose, seed, example.source, example.context, *example.candidates)
 
 
