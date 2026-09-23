@@ -212,10 +212,11 @@ choice. Mean excess was +24.45 pp with clustered 95% CI +13.57 to +35.67 pp,
 and all four repository folds were positive. Pool size averaged 11.43 candidates
 with median 8 and maximum 42.
 
-This passes direct full-scope reranking. The next gate is repository scale,
-which E040 showed can be one to two orders of magnitude larger. It must be
-preregistered separately; do not infer repository-scale success from E041 and do
-not tune the scorer on these pool-expanded E031 tasks.
+This passes direct full-scope reranking. E042 preregisters the repository-scale
+gate on the same 222 tasks and frozen scorer, with exact E031 and E041 continuity
+guards. Repository-pool outcomes are compared against per-task uniform choice
+over the actual E024-bindable repository pool. No retrieval or generator stage
+is introduced until that direct-ranking boundary is measured.
 
 ## Confidence and escalation
 
