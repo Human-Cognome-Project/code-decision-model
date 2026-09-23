@@ -309,3 +309,25 @@ therefore stops this structured edit-intent surface for Qwen 0.5B. Do not run a
 paired assisted E034 experiment or tune the schema/prompt on these pilot tasks.
 A future edit-intent experiment should change generator capability under a
 fresh preregistration.
+
+
+## E035 — Independent replication of E032 ranked correction
+
+See [E035_E032_INDEPENDENT_REPLICATION_PREREG.md](E035_E032_INDEPENDENT_REPLICATION_PREREG.md)
+and [E035_E032_INDEPENDENT_REPLICATION_RESULT.md](E035_E032_INDEPENDENT_REPLICATION_RESULT.md).
+
+E035 froze the final E032 post-rejection prompt and replicated it on the
+preregistered E031 repository population without retuning. The scorer reproduced
+the preserved E031 top-1 counts (244/421 correct), leaving 177
+wrong-first-recommendation tasks.
+
+On those 177 tasks, E029-style rejection-memory correction succeeded on 62
+(35.0%) while ranked re-recommendation succeeded on 111 (62.7%), a +27.68 pp
+gain. Exact McNemar p = 3.48e-7 and the repository-stratified
+source-file-clustered bootstrap 95% interval was +17.65 to +37.16 pp. All three
+preregistered replication gates passed.
+
+Reconstructed overall two-attempt success was 306/421 (72.7%) with E029-style
+memory and 355/421 (84.3%) with ranked re-recommendation. This upgrades the E032
+mechanism from exploratory development evidence to an independently replicated
+structured-selection result.
