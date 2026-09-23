@@ -101,6 +101,7 @@ Post-replication mechanism results now sharpen that question:
 - **E038 ranked-correction transfer:** on the 77 SmolLM2 tasks that entered the intended rejected-wrong-recommendation state, correction success increased from 11/77 (14.3%) with rejection memory to 28/77 (36.4%) with ranked re-recommendation, +22.08 pp; exact McNemar p = 0.00232; clustered 95% CI +9.21 to +35.21 pp.
 - **E039 confidence routing:** an E027-fitted top-softmax threshold of 0.35 produced 289/421 E031 successes versus 287/421 for always-assist, +0.48 pp; p = 0.774; clustered 95% CI -1.45 to +2.26 pp. The preregistered gate failed, so raw top-softmax confidence is stopped as a success-improving first-turn router.
 - **E041 scope-pool reranking:** the frozen E031 scorer ranked the target first on 82/222 (36.9%) complete E024-bindable in-scope function decisions versus 27.73/222 (12.5%) expected from predicate-plus-uniform choice. Mean excess was +24.45 pp with clustered 95% CI +13.57 to +35.67 pp. The preregistered scale gate passed.
+- **E042 repository-pool reranking:** after 13 deterministic ambiguity exclusions, the same scorer ranked the target first on 17/209 (8.13%) complete E024-bindable repository decisions versus 0.607/209 (0.29%) expected under predicate-plus-uniform choice. Mean excess was +7.84 pp with clustered 95% CI +4.46 to +11.85 pp. Repository pools averaged 567 candidates and reached 1,122.
 
 Active directions include:
 
