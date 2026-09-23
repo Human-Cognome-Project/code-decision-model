@@ -53,7 +53,9 @@ machine-labelled truth:
 
 **Label independence.** The spare vocabulary is the union of parameter names
 over all candidates minus the keywords already at the call site; the name is
-chosen by a hash of the caller, the candidate set, and the seed. The answer
+chosen by a hash of the caller, the candidate set, the seed, and the example's
+source path (not shown in the prompt, but fixed before the answer is chosen,
+so label-independent). The answer
 index is read only to fill in the restoring plan's candidate, which is never
 shown. So the visible corruption is a function of what the generator sees, and
 the ranker's reading of the prompt cannot recover the label from how the call
