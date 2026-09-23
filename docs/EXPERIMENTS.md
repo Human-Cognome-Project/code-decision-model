@@ -365,3 +365,13 @@ pinned revision `cbcad7f4d160a10174f725b968ab6faf2a76399e`. The E031 repository
 set, decision scorer, prompt/parser, two-attempt budget, and paired statistics
 remain frozen. Ranked re-recommendation is deliberately excluded and, if
 warranted, will be tested separately.
+
+## E039 — Decision-confidence routing
+
+See [E039_CONFIDENCE_ROUTING_PREREG.md](E039_CONFIDENCE_ROUTING_PREREG.md).
+
+Preregisters a selective-assistance test using only the frozen decision head's
+top-class softmax probability. One threshold is selected on E027 from a fixed
+0.25-to-0.95 grid using preserved paired generator outcomes, then evaluated
+unchanged on preserved E031 paired outcomes. No generator is rerun and no E031
+outcome participates in threshold selection.
