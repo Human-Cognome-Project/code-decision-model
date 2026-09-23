@@ -68,8 +68,14 @@ sentence in the assisted arm's prompt, exactly as in E034.
   back. A preference for a candidate *position* cancels; a preference for a
   candidate's *content* survives. Rotation depends only on the candidate count,
   never on the label, so the set of prompts is a function of visible content.
-  `top_candidate_histogram` reports how often each shown position wins; E034's
-  free generation gave (64, 0, 0, 0).
+  `top_candidate_histogram` reports how often each original candidate holds
+  the top-ranked plan. It equals the shown position only for the unrotated
+  ranking, where E034's free generation gave (64, 0, 0, 0). Under full
+  rotation a cancelled position prior leaves the candidates tied, and the
+  histogram then still names a winner: the tie-break's candidate 1, or an
+  arbitrary one when the rotation average rounds unevenly.
+  `top_candidate_ties` counts the rankings whose top score is shared across
+  candidates, so a cancelled prior reads as ties, not as a candidate-1 win.
 - **Feasible-only ranking** (`feasible_only=True`): restrict the ranked space
   to plans that already bind their candidate (E024). This is the deterministic
   layer acting before the generator rather than after; reported separately
@@ -123,8 +129,8 @@ reported against this row, not against uniform chance.
   change the prompt's tokens. The prompt's key/value cache is computed once and
   copied per continuation, so scoring `n` plans costs one prompt forward plus
   `n` short forwards.
-- `chance_baselines`, `top_candidate_histogram`: the baselines and the
-  position diagnostic above.
+- `chance_baselines`, `top_candidate_histogram`, `top_candidate_ties`: the
+  baselines and the position diagnostic above.
 
 Tests cover rotation bookkeeping (a rotated task verifies its own restoring
 plan), the attractor reproduction, score ordering, normalisation, cancellation
@@ -145,7 +151,7 @@ is `python examples/run_plan_scoring_mock.py --hf`.
    corrective turns when the output surface is canonical continuation
    likelihood ranking over the closed plan space?
 2. **Deterministic signal**: the unchanged E034 verifier and truth; the analytic
-   chance baselines; the rotation histogram.
+   chance baselines; the rotation histogram with its tie count.
 3. **Comparison**: uniform over the plan space; uniform over binding plans;
    binding plans of a correct recommendation (the ranker-plus-predicate bar);
    E034's 0/64 free-generation result on the same tasks; the length-normalised
@@ -165,7 +171,8 @@ is `python examples/run_plan_scoring_mock.py --hf`.
 ## Predictions
 
 - The unrotated ranking will show a strong candidate-1 prior in the histogram,
-  and much of it will vanish under rotation. The 0/64 attractor result makes
+  and much of it will vanish under rotation: the rotated histogram will spread
+  across candidates or the tie count will rise. The 0/64 attractor result makes
   the prior likely, and the rotation control is what makes it measurable.
 - Summed likelihood will over-select `keep`; the normalised secondary will not.
 - If the generator carries any signal, it will show first on the 29 pure-

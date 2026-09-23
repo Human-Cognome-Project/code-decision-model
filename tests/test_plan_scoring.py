@@ -32,6 +32,7 @@ from cdm.plan_scoring import (
     run_plan_scoring_loop,
     shown_position,
     top_candidate_histogram,
+    top_candidate_ties,
 )
 from cdm.synthetic import DecisionExample
 
@@ -291,6 +292,31 @@ def test_top_candidate_histogram():
     item = _item()
     rankings = [rank_plans(item, ConstantScorer()), rank_plans(item, TableScorer({"candidate 3; keep": 0.0}))]
     assert top_candidate_histogram(rankings, 3) == (1, 0, 1)
+    # The constant scorer's winner is a tie-break across candidates; the table
+    # scorer's winner is not.
+    assert top_candidate_ties(rankings) == 1
+    assert top_candidate_ties([()]) == 0
+
+
+class ShownFirstScorer:
+    """A pure position prior: prefers whichever candidate is shown first."""
+
+    def __call__(self, prompt, continuations):
+        return [ContinuationScore(-float(int(c.split(";")[0].split()[1])), 4) for c in continuations]
+
+
+def test_cancelled_position_prior_is_a_tie_not_a_candidate_1_win():
+    item = _item()
+    count = len(item.example.candidates)
+    unrotated = [rank_plans(item, ShownFirstScorer())]
+    assert top_candidate_histogram(unrotated, count)[0] == 1
+    assert top_candidate_ties(unrotated) == 0  # the scorer chose candidate 1
+    rotated = [rank_plans(item, ShownFirstScorer(), shifts=count)]
+    # Full rotation cancels the prior, so every candidate ties. The histogram
+    # still names a winner (the tie-break's, or rounding's with three
+    # candidates); only the tie count shows the scorer chose nothing.
+    assert sum(top_candidate_histogram(rotated, count)) == 1
+    assert top_candidate_ties(rotated) == 1
 
 
 # ---------------------------------------------------------------------------
