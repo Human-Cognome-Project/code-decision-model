@@ -87,6 +87,13 @@ therefore be reported against the predicate-plus-uniform baseline, not raw
 chance, and the live loop should apply the predicate before the recommendation
 so the two effects are separable.
 
+Because negatives come from the whole repository, most of them are names the
+caller cannot reach without a new import. E040 measures this: a filter that
+keeps only names in the caller's scope resolves most frozen cross-file tasks
+with no model, even when it may not use the target's own withheld import. Any
+scorer result on this task must also be reported against that scope-filter
+baseline; see [E040_IN_SCOPE_POOLS.md](E040_IN_SCOPE_POOLS.md).
+
 ## What this tests, per the contribution rule
 
 1. **Open question**: does the frozen decision layer reduce corrective burden
