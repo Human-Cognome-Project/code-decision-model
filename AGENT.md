@@ -36,6 +36,7 @@ The completed confirmatory evidence now includes **E031**, the preregistered dev
 - **E033:** call-expression intent reached only 36/64 parse-valid calls, 23/64 uniquely resolved/bindable calls, and 2/64 exact repairs in a baseline-only validity pilot. Stop this free-form call surface for the 0.5B generator; do not rescue it with permissive deterministic reconstruction.
 - **E034:** the closed-vocabulary one-operation successor failed even earlier: 11/64 syntax-valid plans, 2/64 bindable plans, 0/64 correct operations, and 0/64 exact repairs. All 64 outputs anchored on candidate 1; all 11 parsed plans were `candidate 1; keep`. Stop structured edit-intent generation with the pinned Qwen 0.5B model. Do not prompt-tune, loosen the parser, or invent another schema on these 64 tasks.
 - **E036:** canonical continuation likelihood on the exact 64 E034 tasks did not clear its baseline-only stop floor: 0/64 exact unrotated and 10/64 with cyclic rotation versus 12.32/64 expected under uniform choice over E024-binding plans. Do not run the paired assisted E036 arm or promote the 19/64 feasible-only secondary into a post-hoc gate. This was canonical one-tokenization-per-plan scoring, not exact constrained decoding.
+- **E041:** the frozen E031 scorer transferred from four-way same-file function decisions to complete E024-bindable in-scope pools: 82/222 (36.9%) top-1 versus 27.73/222 (12.5%) expected under predicate-plus-uniform choice, +24.45 pp mean excess; clustered 95% CI +13.57 to +35.67 pp. All four repository folds were positive. Treat direct scope-pool reranking as passed; repository-pool scale remains untested and must be separately preregistered.
 
 Do not reinterpret or retune E031 after seeing its result. Do not tune the four E027 repositories merely to improve reported historical numbers.
 
@@ -47,7 +48,7 @@ Current high-value work includes:
 
 - if structured edit-intent generation is revisited, use a materially more capable generator under a fresh preregistration; do not continue schema/prompt tuning with Qwen 0.5B;
 - extend deterministic supervision to harder cross-file/LSP/compiler/type-checker tasks;
-- run the preregistered E041 scorer-only scope-pool reranking gate before any repository-scale or generator-pool experiment;
+- preregister the repository-pool scale gate now that E041 passed complete in-scope reranking;
 - test repository-scale retrieval followed by decision reranking;
 - revisit calibrated confidence/escalation on genuinely unseen repositories;
 - reduce cost only when the corrective-burden effect survives.
