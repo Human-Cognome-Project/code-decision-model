@@ -375,22 +375,31 @@ re-recommendation remains out of scope for E037 and may be tested separately.
 
 ## E038 — SmolLM2 ranked-correction transfer
 
-See [E038_SMOLLM_RANKED_CORRECTION_PREREG.md](E038_SMOLLM_RANKED_CORRECTION_PREREG.md).
+See [E038_SMOLLM_RANKED_CORRECTION_PREREG.md](E038_SMOLLM_RANKED_CORRECTION_PREREG.md)
+and [E038_SMOLLM_RANKED_CORRECTION_RESULT.md](E038_SMOLLM_RANKED_CORRECTION_RESULT.md).
 
-Preregisters transfer of the independently replicated E032/E035 ranked
-post-rejection recommendation mechanism to the E037 SmolLM2 generator. The
-primary population is frozen to the 77 E037 tasks where the scorer top-1 was
-wrong and SmolLM2 actually followed that recommendation on turn one, producing
-a deterministic rejection. E038 generates only the paired correction turn:
-E029-style rejection memory versus the unchanged E035 ranked-evidence append.
-No E037 second-turn outcome participates in selection.
+On the frozen 77-task E037 subset where SmolLM2 actually followed a wrong first
+recommendation, rejection-memory correction succeeded on 11/77 (14.3%) while
+ranked re-recommendation succeeded on 28/77 (36.4%), a +22.08 pp gain. Exact
+McNemar p = 0.00232 and the repository-stratified source-file bootstrap 95%
+interval was +9.21 to +35.21 pp. All three preregistered transfer gates passed.
+
+The next feasible scorer recommendation was correct on 55/77 tasks, while
+SmolLM2 followed it on only 38/77 correction turns. E038 therefore transfers the
+ranked post-rejection mechanism to a second compact generator family despite
+substantially weaker recommendation following than Qwen in E035.
 
 ## E039 — Decision-confidence routing
 
-See [E039_CONFIDENCE_ROUTING_PREREG.md](E039_CONFIDENCE_ROUTING_PREREG.md).
+See [E039_CONFIDENCE_ROUTING_PREREG.md](E039_CONFIDENCE_ROUTING_PREREG.md) and
+[E039_CONFIDENCE_ROUTING_RESULT.md](E039_CONFIDENCE_ROUTING_RESULT.md).
 
-Preregisters a selective-assistance test using only the frozen decision head's
-top-class softmax probability. One threshold is selected on E027 from a fixed
-0.25-to-0.95 grid using preserved paired generator outcomes, then evaluated
-unchanged on preserved E031 paired outcomes. No generator is rerun and no E031
-outcome participates in threshold selection.
+E027 selected threshold 0.35 under the preregistered success-maximization and
+higher-threshold tie-break. Applied unchanged to E031, that threshold routed
+385/421 tasks to assistance and produced 289/421 successes versus 287/421 under
+always-assist, only +0.48 pp. Exact McNemar p = 0.774 and the clustered 95% CI
+was -1.45 to +2.26 pp. The preregistered gate failed.
+
+Top-class softmax confidence is therefore stopped as a success-improving
+first-turn router under this protocol. Do not retune its threshold or transform
+on E031.
