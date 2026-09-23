@@ -357,14 +357,21 @@ python examples/run_plan_scoring_mock.py
 
 ## E037 — Second-generator replication
 
-See [E037_SECOND_GENERATOR_PREREG.md](E037_SECOND_GENERATOR_PREREG.md).
+See [E037_SECOND_GENERATOR_PREREG.md](E037_SECOND_GENERATOR_PREREG.md) and
+[E037_SECOND_GENERATOR_RESULT.md](E037_SECOND_GENERATOR_RESULT.md).
 
-Preregisters a generator-dependence replication of the frozen E031
-structured-selection intervention using HuggingFaceTB/SmolLM2-360M-Instruct at
-pinned revision `cbcad7f4d160a10174f725b968ab6faf2a76399e`. The E031 repository
-set, decision scorer, prompt/parser, two-attempt budget, and paired statistics
-remain frozen. Ranked re-recommendation is deliberately excluded and, if
-warranted, will be tested separately.
+The frozen E031 structured-selection intervention replicated with
+HuggingFaceTB/SmolLM2-360M-Instruct at pinned revision
+`cbcad7f4d160a10174f725b968ab6faf2a76399e`. Across the same 421 independent
+tasks, success within two attempts increased from 113/421 (26.8%) baseline to
+160/421 (38.0%) assisted, a paired gain of +11.16 pp. Exact McNemar p =
+2.05e-9 and the repository-stratified source-file bootstrap 95% interval was
++7.74 to +14.42 pp, so all three preregistered replication gates passed.
+
+SmolLM2 followed the first recommendation on only 181/421 tasks and assisted
+first-turn parse validity was 305/421 (72.4%), so transfer occurred despite
+substantially weaker prompt compliance than E031's Qwen run. Ranked
+re-recommendation remains out of scope for E037 and may be tested separately.
 
 ## E039 — Decision-confidence routing
 
