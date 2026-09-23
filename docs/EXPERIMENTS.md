@@ -452,3 +452,14 @@ repository folds had positive excess.
 
 E041 therefore supports direct frozen-scorer ranking at complete in-scope scale.
 Repository-level pools remain a separate, larger gate.
+
+## E042 — Repository-pool reranking
+
+See [E042_REPOSITORY_POOL_RERANKING_PREREG.md](E042_REPOSITORY_POOL_RERANKING_PREREG.md).
+
+Preregisters the next scale gate after E041: the same frozen E031 scorer and
+same 222 same-file function tasks, now re-posed over complete E024-bindable
+repository pools. E031 four-way and E041 scope-pool results are frozen continuity
+guards. The primary statistic remains neural top-1 excess over per-task
+predicate-plus-uniform expectation, with a repository-stratified source-file
+bootstrap. No generator or retrieval stage is introduced.
