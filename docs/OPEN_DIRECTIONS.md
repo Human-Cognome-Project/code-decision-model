@@ -297,3 +297,15 @@ diagnostics, deterministic API compatibility, and test/mutation outcomes.
 Every new predicate should be machine-checkable, fail open on unavailable
 information, and include labelled-target veto regression checks before it is
 allowed into a live experiment.
+
+## E043 — Cross-file bounded retrieval (preregistered)
+
+E043 moves the main line to a task where deterministic same-file scope does not
+trivialize retrieval. It uses E030 cross-file callers: the deterministic import
+resolver supplies the label, while the returned caller context already omits the
+import statement and masks the callee. Potion 16M is the primary cheap retriever;
+frozen CodeRank cosine is the reference. The primary shortlist is fixed at 32.
+
+A retriever continues only if recall@32 is at least 75% and its clustered excess
+over uniform has a positive lower confidence bound. A pass justifies a separate
+frozen-reranker experiment; a failure does not permit post-hoc cutoff tuning.
