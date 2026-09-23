@@ -41,7 +41,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Current evidence
 
-The strongest completed result is **E031**, the preregistered development-independent replication.
+The strongest completed evidence now includes **E031**, the preregistered development-independent replication, and **E037**, its preregistered second-generator replication.
 
 ### E027 — development repositories
 
@@ -67,7 +67,25 @@ Paired success-rate gain: **+20.67 percentage points**. Exact McNemar p = **1.29
 
 See [docs/E031_INDEPENDENT_REPLICATION_RESULT.md](docs/E031_INDEPENDENT_REPLICATION_RESULT.md).
 
-These results support the frozen structured-selection task. They are not claims about arbitrary free-form code repair.
+### E037 — second-generator replication
+
+The same frozen E031 task, decision scorer, prompt/parser, verifier, and
+two-attempt budget were run with `HuggingFaceTB/SmolLM2-360M-Instruct`.
+
+| Metric | Baseline | Decision-assisted |
+| --- | ---: | ---: |
+| First-pass success | 80/421 (19.0%) | 124/421 (29.5%) |
+| Success within two attempts | 113/421 (26.8%) | 160/421 (38.0%) |
+
+Paired success-rate gain: **+11.16 percentage points**. Exact McNemar p =
+**2.05e-9**. Repository-stratified source-file bootstrap 95% CI: **+7.74 to
++14.42 points**. The preregistered replication gate passed.
+
+See [docs/E037_SECOND_GENERATOR_RESULT.md](docs/E037_SECOND_GENERATOR_RESULT.md).
+
+These results support the frozen structured-selection task across two compact
+open generator families. They are not claims about arbitrary free-form code
+repair.
 
 ## Current phase
 
@@ -78,12 +96,12 @@ Three post-replication mechanism results now sharpen that question:
 - **E032/E035 ranked re-recommendation:** the development result improved wrong-recommendation recovery from 56/164 (34.1%) to 79/164 (48.2%). E035 then independently replicated the exact final intervention on the frozen E031 repositories: 62/177 (35.0%) under rejection memory versus 111/177 (62.7%) with ranked re-recommendation, +27.68 pp; exact McNemar p = 3.48e-7; clustered 95% CI +17.65 to +37.16 pp. Reconstructed overall success was 306/421 (72.7%) versus 355/421 (84.3%).
 - **E033 call-expression intent:** a baseline-only 64-task validity pilot reached only 23/64 uniquely resolved/bindable calls and 2/64 exact repairs. The free-form call-expression surface is stopped for the pinned 0.5B generator.
 - **E034 closed-vocabulary argument operations:** narrowing the output to one candidate plus one closed-vocabulary operation did not rescue Qwen 0.5B. Only 11/64 plans parsed, 2/64 were bindable, and 0/64 exactly repaired the call. All parsed plans were `candidate 1; keep`. Structured edit-intent generation is therefore stopped for this generator.
+- **E037 second-generator replication:** with SmolLM2-360M-Instruct, success within two attempts increased from 113/421 (26.8%) to 160/421 (38.0%), +11.16 pp; exact McNemar p = 2.05e-9; clustered 95% CI +7.74 to +14.42 pp. The frozen structured-selection effect therefore transferred to a second generator family.
 
 Active directions include:
 
-- replication of the frozen structured-selection and ranked-correction mechanisms with a second compact open generator;
+- preregistered transfer of the independently replicated ranked-correction mechanism to SmolLM2;
 - a materially more capable generator, under fresh preregistration, if structured edit-intent generation is revisited;
-- replication with a second compact open generator;
 - harder cross-file/LSP/compiler/type-checker decision tasks;
 - repository-scale retrieval followed by decision reranking;
 - calibrated escalation on unseen repositories;
@@ -118,4 +136,4 @@ Optional extras exist for specific encoders and live-generator experiments. Core
 
 ## Status
 
-Experimental research code. E031 is the current strongest confirmatory result; post-replication mechanism and generation-surface experiments are active.
+Experimental research code. E031 remains the main development-independent confirmatory result, and E037 independently extends the frozen structured-selection effect to a second compact generator family.

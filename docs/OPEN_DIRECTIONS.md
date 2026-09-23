@@ -107,22 +107,28 @@ Do not:
 If structured edit intent is revisited, change the generator capability under a
 fresh preregistration instead of changing the task around this result.
 
-## Second-generator replication
+## E037 — second-generator replication (completed)
 
-Now that E031 is complete, repeat the **frozen E031 intervention** with another compact open generator.
+The frozen E031 structured-selection intervention was repeated with
+`HuggingFaceTB/SmolLM2-360M-Instruct` at pinned revision
+`cbcad7f4d160a10174f725b968ab6faf2a76399e`.
 
-The purpose is not to improve Qwen's result. It is to measure generator dependence.
+Result on the same 421 independent tasks:
 
-Freeze:
+- baseline success within two attempts: 113/421 (26.8%);
+- assisted success: 160/421 (38.0%);
+- paired delta: +11.16 pp;
+- exact McNemar p = 2.05e-9;
+- source-file-clustered 95% CI: +7.74 to +14.42 pp.
 
-- repository set and revisions;
-- decision scorer recipe;
-- structured index protocol;
-- parser;
-- attempt budget;
-- deterministic statistics.
+All three preregistered gates passed. The effect therefore transfers to a
+second compact generator family, although SmolLM2 showed materially weaker
+first-turn recommendation following (181/421, 43.0%) and lower assisted
+first-turn parse validity (305/421, 72.4%) than the Qwen run.
 
-A second generator may use GPU for practical throughput, but hardware must not change the decoding semantics.
+The next clean generator-dependence test is the E035 ranked-correction mechanism:
+preregister its unchanged transfer to SmolLM2 as E038. Do not tune E037 on these
+421 tasks before that test.
 
 ## Harder deterministic decision types
 
