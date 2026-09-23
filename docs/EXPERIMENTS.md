@@ -463,3 +463,20 @@ repository pools. E031 four-way and E041 scope-pool results are frozen continuit
 guards. The primary statistic remains neural top-1 excess over per-task
 predicate-plus-uniform expectation, with a repository-stratified source-file
 bootstrap. No generator or retrieval stage is introduced.
+
+## E042 — Repository-pool reranking result
+
+See [E042_REPOSITORY_POOL_RERANKING_PREREG.md](E042_REPOSITORY_POOL_RERANKING_PREREG.md)
+and [E042_REPOSITORY_POOL_RERANKING_RESULT.md](E042_REPOSITORY_POOL_RERANKING_RESULT.md).
+
+The frozen scorer passed the repository-scale gate. After 13 deterministic
+rendering-ambiguity exclusions, 209/222 frozen same-file function tasks remained.
+Repository pools averaged 566.75 E024-bindable candidates (median 483, range
+76–1,122). Neural top-1 was 17/209 (8.13%) versus 0.607/209 (0.29%) expected
+under per-task predicate-plus-uniform choice. Mean excess was +7.84 pp with a
+repository-stratified source-file bootstrap 95% CI of +4.46 to +11.85 pp.
+
+All E031 and E041 continuity guards reproduced exactly. The result establishes
+repository-wide ranking signal, not a practical direct-selection interface; the
+next main-line question is retrieval/shortlisting with target recall measured
+separately from reranking.
