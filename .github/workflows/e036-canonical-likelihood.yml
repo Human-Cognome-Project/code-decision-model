@@ -1,0 +1,369 @@
+name: e036-canonical-likelihood-pilot
+
+on:
+  push:
+    branches: ["analysis/e036-canonical-likelihood-live"]
+
+jobs:
+  score:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Restore model cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: e025-qwen05-coderank-${{ runner.os }}-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install model dependencies
+        run: python -m pip install -e ".[hf]"
+      - name: Clone exact E027 revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"; sha="$2"; dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/e036-repos
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/e036-repos/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/e036-repos/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/e036-repos/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/e036-repos/scrapling
+      - name: Score frozen E034 sample shard
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from collections import Counter, defaultdict
+
+          from cdm.argument_ops import (
+              argument_repair_example,
+              corruption_is_label_invariant,
+              plan_space,
+              predicate_census,
+              predicate_search,
+              verify_argument_repair,
+          )
+          from cdm.crossfile import repository_hard_masked_cross_file_call_examples
+          from cdm.methods import repository_hard_masked_method_call_examples
+          from cdm.plan_scoring import HFPlanScorer, chance_baselines, rank_plans
+          from cdm.repository import repository_hard_masked_call_examples
+
+          REPOS = {
+              "browser-use": "/tmp/e036-repos/browser-use",
+              "crawl4ai": "/tmp/e036-repos/crawl4ai",
+              "markitdown": "/tmp/e036-repos/markitdown",
+              "scrapling": "/tmp/e036-repos/scrapling",
+          }
+          K = 4
+          BODY_CHARS = 512
+          TARGET_N = 64
+          SEED = 0
+          SHARD = int(os.environ["SHARD"])
+          SHARDS = 4
+
+          eligible_rows = []
+          extraction = {}
+          for repo, root in REPOS.items():
+              families = {
+                  "function": repository_hard_masked_call_examples(
+                      root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+                  ),
+                  "method": repository_hard_masked_method_call_examples(
+                      root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+                  ),
+                  "cross_file": repository_hard_masked_cross_file_call_examples(
+                      root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+                  ),
+              }
+              extraction[repo] = {}
+              for family, examples in families.items():
+                  constructed = 0
+                  invariant = 0
+                  for example in examples:
+                      item = argument_repair_example(example, seed=SEED)
+                      if item is None:
+                          continue
+                      constructed += 1
+                      if not corruption_is_label_invariant(example, seed=SEED):
+                          continue
+                      invariant += 1
+                      eligible_rows.append((repo, family, example, item))
+                  extraction[repo][family] = {
+                      "base_total": len(examples),
+                      "e034_constructed": constructed,
+                      "label_invariant": invariant,
+                  }
+
+          if len(eligible_rows) < TARGET_N:
+              raise RuntimeError(f"only {len(eligible_rows)} eligible E034 tasks; need {TARGET_N}")
+
+          def stable_key(row):
+              repo, family, example, _item = row
+              payload = "\x1f".join([
+                  repo,
+                  family,
+                  example.source,
+                  example.task,
+                  example.context,
+                  *example.candidates,
+              ]).encode("utf-8")
+              return hashlib.sha256(payload).hexdigest()
+
+          by_stratum = defaultdict(list)
+          for row in eligible_rows:
+              by_stratum[(row[0], row[1])].append(row)
+          for key in by_stratum:
+              by_stratum[key].sort(key=stable_key)
+
+          selected = []
+          selected_ids = set()
+          quota = 4
+          for key in sorted(by_stratum):
+              for row in by_stratum[key][:quota]:
+                  sid = stable_key(row)
+                  if sid not in selected_ids:
+                      selected.append(row)
+                      selected_ids.add(sid)
+
+          remaining = sorted(
+              (row for row in eligible_rows if stable_key(row) not in selected_ids),
+              key=stable_key,
+          )
+          selected.extend(remaining[: max(0, TARGET_N - len(selected))])
+          selected = selected[:TARGET_N]
+          if len(selected) != TARGET_N:
+              raise RuntimeError(f"selected {len(selected)} tasks, expected {TARGET_N}")
+
+          sample_counts = Counter((repo, family) for repo, family, _, _ in selected)
+          sample_perturbations = Counter(item.perturbation for _, _, _, item in selected)
+          shard_rows = [(i, row) for i, row in enumerate(selected) if i % SHARDS == SHARD]
+          if len(shard_rows) != 16:
+              raise RuntimeError(f"shard {SHARD} expected 16 tasks, got {len(shard_rows)}")
+
+          scorer = HFPlanScorer()
+          records = []
+
+          def exact(item, scored):
+              return bool(scored) and verify_argument_repair(item, scored.plan.render()).valid
+
+          def normalized_top(ranked, space):
+              if not ranked:
+                  return None
+              return min(
+                  ranked,
+                  key=lambda sp: (
+                      -(sp.log_probability / sp.tokens if sp.tokens else float("-inf")),
+                      space.index(sp.plan),
+                  ),
+              )
+
+          for sample_index, (repo, family, example, item) in shard_rows:
+              census = predicate_census(item)
+              if not census.restoring_plan_binds:
+                  raise RuntimeError(f"restoring plan does not bind: sample {sample_index}")
+              space = list(plan_space(item))
+              binding = list(predicate_search(item))
+              chance = chance_baselines(item)
+
+              unrotated = list(rank_plans(item, scorer, shifts=1, normalize=False))
+              rotated = list(rank_plans(item, scorer, shifts=4, normalize=False))
+              if len(unrotated) != len(space) or len(rotated) != len(space):
+                  raise RuntimeError(f"ranking-size drift: sample {sample_index}")
+
+              unrot_norm = normalized_top(unrotated, space)
+              rot_norm = normalized_top(rotated, space)
+              unrot_feasible = next((sp for sp in unrotated if sp.plan in binding), None)
+              rot_feasible = next((sp for sp in rotated if sp.plan in binding), None)
+
+              records.append({
+                  "sample_index": sample_index,
+                  "sample_id": stable_key((repo, family, example, item)),
+                  "repo": repo,
+                  "family": family,
+                  "source": example.source,
+                  "task": example.task,
+                  "answer_index": example.answer_index,
+                  "perturbation": item.perturbation,
+                  "plan_space_size": census.plan_space_size,
+                  "binding_plans": census.binding_plans,
+                  "pure_selection": census.pure_selection,
+                  "uniform_expected": chance.uniform,
+                  "feasible_uniform_expected": chance.feasible_uniform,
+                  "unrotated_sum": {
+                      "plan": unrotated[0].plan.render(),
+                      "candidate_index": unrotated[0].plan.candidate_index,
+                      "score": unrotated[0].score,
+                      "exact": exact(item, unrotated[0]),
+                  },
+                  "rotated_sum": {
+                      "plan": rotated[0].plan.render(),
+                      "candidate_index": rotated[0].plan.candidate_index,
+                      "score": rotated[0].score,
+                      "exact": exact(item, rotated[0]),
+                  },
+                  "unrotated_normalized": {
+                      "plan": unrot_norm.plan.render(),
+                      "candidate_index": unrot_norm.plan.candidate_index,
+                      "score": unrot_norm.log_probability / unrot_norm.tokens,
+                      "exact": exact(item, unrot_norm),
+                  },
+                  "rotated_normalized": {
+                      "plan": rot_norm.plan.render(),
+                      "candidate_index": rot_norm.plan.candidate_index,
+                      "score": rot_norm.log_probability / rot_norm.tokens,
+                      "exact": exact(item, rot_norm),
+                  },
+                  "unrotated_feasible_sum": {
+                      "plan": unrot_feasible.plan.render() if unrot_feasible else None,
+                      "candidate_index": unrot_feasible.plan.candidate_index if unrot_feasible else None,
+                      "exact": exact(item, unrot_feasible) if unrot_feasible else False,
+                  },
+                  "rotated_feasible_sum": {
+                      "plan": rot_feasible.plan.render() if rot_feasible else None,
+                      "candidate_index": rot_feasible.plan.candidate_index if rot_feasible else None,
+                      "exact": exact(item, rot_feasible) if rot_feasible else False,
+                  },
+              })
+
+          payload = {
+              "shard": SHARD,
+              "records": records,
+              "selection": {
+                  "tasks": len(selected),
+                  "sample_counts": {
+                      f"{repo}:{family}": count
+                      for (repo, family), count in sorted(sample_counts.items())
+                  },
+                  "sample_perturbations": dict(sorted(sample_perturbations.items())),
+                  "extraction": extraction,
+              },
+          }
+          path = f"/tmp/e036-shard-{SHARD}.json"
+          with open(path, "w", encoding="utf-8") as handle:
+              json.dump(payload, handle, indent=2, sort_keys=True)
+          print(json.dumps({
+              "shard": SHARD,
+              "tasks": len(records),
+              "unrotated_sum_exact": sum(r["unrotated_sum"]["exact"] for r in records),
+              "rotated_sum_exact": sum(r["rotated_sum"]["exact"] for r in records),
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e036-shard-${{ matrix.shard }}
+          path: /tmp/e036-shard-${{ matrix.shard }}.json
+
+  aggregate:
+    needs: score
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e036-shard-*
+          path: /tmp/e036
+          merge-multiple: true
+      - name: Aggregate baseline-only canonical-likelihood pilot
+        run: |
+          python - <<'PY'
+          import glob
+          import json
+          from collections import Counter
+
+          payloads = []
+          records = []
+          for path in sorted(glob.glob("/tmp/e036/e036-shard-*.json")):
+              with open(path, encoding="utf-8") as handle:
+                  payload = json.load(handle)
+              payloads.append(payload)
+              records.extend(payload["records"])
+
+          if len(payloads) != 4:
+              raise RuntimeError(f"expected four E036 shards, got {len(payloads)}")
+          if len(records) != 64:
+              raise RuntimeError(f"expected 64 E036 records, got {len(records)}")
+          records.sort(key=lambda r: r["sample_index"])
+          if [r["sample_index"] for r in records] != list(range(64)):
+              raise RuntimeError("E036 sample-index coverage drift")
+          if len({r["sample_id"] for r in records}) != 64:
+              raise RuntimeError("E036 duplicate sample id")
+
+          first_selection = payloads[0]["selection"]
+          for payload in payloads[1:]:
+              if payload["selection"] != first_selection:
+                  raise RuntimeError("E036 shard selection metadata drift")
+
+          feasible_expected = sum(r["feasible_uniform_expected"] for r in records)
+          uniform_expected = sum(r["uniform_expected"] for r in records)
+
+          def successes(field):
+              return sum(r[field]["exact"] for r in records)
+
+          def hist(field):
+              return dict(sorted(Counter(
+                  r[field]["candidate_index"] + 1
+                  for r in records
+                  if r[field]["candidate_index"] is not None
+              ).items()))
+
+          pure = [r for r in records if r["pure_selection"]]
+          summary = {
+              "protocol": "E036 baseline-only canonical continuation likelihood pilot",
+              "tasks": 64,
+              "model": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+              "revision": "ea3f2471cf1b1f0db85067f1ef93848e38e88c25",
+              "uniform_plan_space_expected_exact": uniform_expected,
+              "uniform_binding_expected_exact": feasible_expected,
+              "unrotated_sum_exact": successes("unrotated_sum"),
+              "rotated_sum_exact": successes("rotated_sum"),
+              "unrotated_normalized_exact": successes("unrotated_normalized"),
+              "rotated_normalized_exact": successes("rotated_normalized"),
+              "unrotated_feasible_sum_exact": successes("unrotated_feasible_sum"),
+              "rotated_feasible_sum_exact": successes("rotated_feasible_sum"),
+              "unrotated_sum_top_candidate_histogram": hist("unrotated_sum"),
+              "rotated_sum_top_candidate_histogram": hist("rotated_sum"),
+              "pure_selection": {
+                  "tasks": len(pure),
+                  "unrotated_sum_exact": sum(r["unrotated_sum"]["exact"] for r in pure),
+                  "rotated_sum_exact": sum(r["rotated_sum"]["exact"] for r in pure),
+                  "unrotated_normalized_exact": sum(r["unrotated_normalized"]["exact"] for r in pure),
+                  "rotated_normalized_exact": sum(r["rotated_normalized"]["exact"] for r in pure),
+              },
+              "literal_stop_floor_check": {
+                  "unrotated_sum_not_above_binding_expectation":
+                      successes("unrotated_sum") <= feasible_expected,
+                  "rotated_sum_not_above_binding_expectation":
+                      successes("rotated_sum") <= feasible_expected,
+              },
+              "selection": first_selection,
+          }
+          summary["literal_stop_floor_check"]["both"] = (
+              summary["literal_stop_floor_check"]["unrotated_sum_not_above_binding_expectation"]
+              and summary["literal_stop_floor_check"]["rotated_sum_not_above_binding_expectation"]
+          )
+
+          with open("/tmp/e036-aggregate.json", "w", encoding="utf-8") as handle:
+              json.dump({"summary": summary, "records": records}, handle, indent=2, sort_keys=True)
+          print("E036_AGGREGATE=" + json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e036-aggregate
+          path: /tmp/e036-aggregate.json
