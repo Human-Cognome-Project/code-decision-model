@@ -117,7 +117,12 @@ token boundary.
 - unrotated summed likelihood: 0/64;
 - four-way rotated summed likelihood: 10/64;
 - unrotated candidate-1 top-plan frequency: 64/64;
-- rotated top-candidate histogram: 13/13/18/20.
+- rotated mapped-back winner histogram: 13/13/18/20.
+
+The rotated histogram is not evidence by itself that the position prior
+cancelled: cross-candidate ties can still be assigned a nominal winner by the
+tie-break or floating-point rounding. The live aggregate predates the explicit
+`top_candidate_ties` diagnostic, so tie counts cannot be reconstructed from it.
 
 Both primary summed-likelihood variants remained at or below the preregistered
 predicate-plus-uniform floor, so the stop condition fired and no paired assisted
