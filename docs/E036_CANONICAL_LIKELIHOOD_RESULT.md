@@ -57,9 +57,18 @@ After cyclic rotation and mapping back to original candidates:
 - candidate 3: 18;
 - candidate 4: 20.
 
-This confirms that the unrotated canonical ranking was dominated by the same
-candidate-position prior exposed by E034, and that the rotation control largely
-removed it.
+The 64/64 unrotated candidate-1 result is consistent with the same strong
+candidate-position effect exposed by E034. The rotated histogram, however,
+counts the original candidate IDs after scores are mapped back from the rotated
+prompts. It does **not** by itself establish that the position prior was removed:
+a fully cancelled position prior can leave cross-candidate ties whose eventual
+histogram winner is determined by tie-breaking or floating-point rounding.
+
+The live E036 aggregate did not retain enough per-candidate top-score information
+to reconstruct the new cross-candidate tie diagnostic added after this run.
+Future rotation diagnostics should report `top_candidate_ties` alongside the
+histogram. This interpretive correction does not change the 0/64 and 10/64
+primary results or the preregistered stop decision.
 
 ## Secondary diagnostics
 
