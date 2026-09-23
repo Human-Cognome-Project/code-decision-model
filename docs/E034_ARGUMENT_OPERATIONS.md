@@ -169,3 +169,27 @@ memory can be composed with this loop later; the first live run is the plain
 baseline-only validity pilot. Multi-operation plans are a later extension and
 must be enumerated by the baseline at the same bound before being allowed to
 the generator.
+
+
+## Baseline validity pilot result
+
+See [E034_VALIDITY_PILOT_PREREG.md](E034_VALIDITY_PILOT_PREREG.md) and
+[E034_VALIDITY_PILOT_RESULT.md](E034_VALIDITY_PILOT_RESULT.md).
+
+The preregistered 64-task baseline-only pilot failed the validity gate for the
+pinned Qwen 0.5B generator:
+
+- syntax-valid plans: 11/64 (17.2%);
+- bindable edited calls: 2/64 (3.1%);
+- correct restoring operation: 0/64;
+- exact repairs: 0/64.
+
+All 64 outputs anchored on candidate 1, and all 11 parsed plans were exactly
+`candidate 1; keep`. The deterministic predicate solved 0/64 tasks outright,
+although 29/64 were pure-selection cases.
+
+Therefore the E034 surface is **stopped for Qwen 0.5B**. Do not run the paired
+assisted experiment, prompt-tune on the pilot tasks, loosen the parser, or create
+another narrower schema for this generator. If structured edit intent is
+revisited, use a materially more capable generator under a fresh
+preregistration.

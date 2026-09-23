@@ -291,3 +291,21 @@ Census:
 ```bash
 python examples/census_argument_ops.py
 ```
+
+### E034 baseline validity pilot
+
+See [E034_VALIDITY_PILOT_PREREG.md](E034_VALIDITY_PILOT_PREREG.md) and
+[E034_VALIDITY_PILOT_RESULT.md](E034_VALIDITY_PILOT_RESULT.md).
+
+The preregistered 64-task baseline-only pilot failed the validity gate for the
+pinned Qwen 0.5B generator. Only 11/64 outputs parsed as valid plans, 2/64
+produced bindable edited calls, no output emitted the correct restoring
+operation, and exact success was 0/64. Every output anchored on candidate 1; all
+11 parsed plans were `candidate 1; keep`.
+
+The deterministic predicate solved 0/64 tasks by itself, while 29/64 were
+pure-selection cases with exactly one binding plan per candidate. E034
+therefore stops this structured edit-intent surface for Qwen 0.5B. Do not run a
+paired assisted E034 experiment or tune the schema/prompt on these pilot tasks.
+A future edit-intent experiment should change generator capability under a
+fresh preregistration.

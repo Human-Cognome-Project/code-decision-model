@@ -30,6 +30,7 @@ The strongest completed evidence is now **E031**, the preregistered development-
 - **E031:** on 421 tasks from AlphaFold, Pyodide, Optuna, and pytest, the frozen protocol improved success from 200/421 (47.5%) to 287/421 (68.2%), +20.67 pp; exact McNemar p = 1.29e-11; source-file clustered 95% CI +13.97 to +27.46 pp. The preregistered gate passed.
 - **E032:** the live ranked-memory correction test improved success from 292/400 (73.0%) under E029 to 315/400 (78.75%). On 164 wrong-first-recommendation tasks, correction success rose from 56/164 (34.1%) to 79/164 (48.2%), +14.02 pp; exact McNemar p = 0.0128; clustered 95% CI +2.07 to +25.49 pp. This remains exploratory development-set evidence; replicate the exact frozen intervention on the E031 independent repositories before generalizing it.
 - **E033:** call-expression intent reached only 36/64 parse-valid calls, 23/64 uniquely resolved/bindable calls, and 2/64 exact repairs in a baseline-only validity pilot. Stop this free-form call surface for the 0.5B generator; do not rescue it with permissive deterministic reconstruction.
+- **E034:** the closed-vocabulary one-operation successor failed even earlier: 11/64 syntax-valid plans, 2/64 bindable plans, 0/64 correct operations, and 0/64 exact repairs. All 64 outputs anchored on candidate 1; all 11 parsed plans were `candidate 1; keep`. Stop structured edit-intent generation with the pinned Qwen 0.5B model. Do not prompt-tune, loosen the parser, or invent another schema on these 64 tasks.
 
 Do not reinterpret or retune E031 after seeing its result. Do not tune the four E027 repositories merely to improve reported historical numbers.
 
@@ -40,7 +41,7 @@ See [docs/OPEN_DIRECTIONS.md](docs/OPEN_DIRECTIONS.md).
 Current high-value work includes:
 
 - replicate the exact final E032 ranked-correction intervention on the E031 independent repository set without retuning;
-- design a narrower machine-checkable AST-operation schema as the successor to the stopped E033 free-form call surface;
+- if structured edit-intent generation is revisited, use a materially more capable generator under a fresh preregistration; do not continue schema/prompt tuning with Qwen 0.5B;
 - replicate the frozen E031 intervention with a second compact open generator;
 - extend deterministic supervision to harder cross-file/LSP/compiler/type-checker tasks;
 - test repository-scale retrieval followed by decision reranking;
@@ -64,7 +65,8 @@ Current high-value work includes:
 - retuning E027 or E031 test sets;
 - further prompt tuning of E029 after its near-null result;
 - raw Potion-margin routing already falsified by E020;
-- free-form repair generation without a deterministic measurement bridge.
+- free-form repair generation without a deterministic measurement bridge;
+- further Qwen 0.5B prompt/schema tuning on the E033/E034 validity-pilot tasks.
 
 ## How to work
 
