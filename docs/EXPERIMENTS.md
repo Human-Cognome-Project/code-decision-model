@@ -373,6 +373,18 @@ first-turn parse validity was 305/421 (72.4%), so transfer occurred despite
 substantially weaker prompt compliance than E031's Qwen run. Ranked
 re-recommendation remains out of scope for E037 and may be tested separately.
 
+## E038 — SmolLM2 ranked-correction transfer
+
+See [E038_SMOLLM_RANKED_CORRECTION_PREREG.md](E038_SMOLLM_RANKED_CORRECTION_PREREG.md).
+
+Preregisters transfer of the independently replicated E032/E035 ranked
+post-rejection recommendation mechanism to the E037 SmolLM2 generator. The
+primary population is frozen to the 77 E037 tasks where the scorer top-1 was
+wrong and SmolLM2 actually followed that recommendation on turn one, producing
+a deterministic rejection. E038 generates only the paired correction turn:
+E029-style rejection memory versus the unchanged E035 ranked-evidence append.
+No E037 second-turn outcome participates in selection.
+
 ## E039 — Decision-confidence routing
 
 See [E039_CONFIDENCE_ROUTING_PREREG.md](E039_CONFIDENCE_ROUTING_PREREG.md).
