@@ -429,3 +429,15 @@ Census:
 ```bash
 python examples/census_in_scope_pools.py
 ```
+
+## E041 — Scope-pool reranking
+
+See [E041_SCOPE_POOL_RERANKING_PREREG.md](E041_SCOPE_POOL_RERANKING_PREREG.md).
+
+Preregisters a scorer-only scale gate on the frozen E031 same-file function
+population. The exact E031 leave-one-repository-out scorer is trained unchanged,
+then each held-out four-candidate task is re-posed over its complete E040
+E024-bindable in-scope pool. Primary performance is neural top-1 accuracy minus
+the per-task predicate-plus-uniform expectation `1 / pool_size`, with a
+repository-stratified source-file bootstrap. No generator or cross-file task is
+introduced at this gate.
