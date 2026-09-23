@@ -48,8 +48,8 @@ Current high-value work includes:
 
 - if structured edit-intent generation is revisited, use a materially more capable generator under a fresh preregistration; do not continue schema/prompt tuning with Qwen 0.5B;
 - extend deterministic supervision to harder cross-file/LSP/compiler/type-checker tasks;
-- preregister the repository-pool scale gate now that E041 passed complete in-scope reranking;
-- test repository-scale retrieval followed by decision reranking;
+- run the preregistered E042 repository-pool reranking gate with E031/E041 continuity guards;
+- test repository-scale retrieval followed by decision reranking after E042 establishes the direct-ranking boundary;
 - revisit calibrated confidence/escalation on genuinely unseen repositories;
 - reduce cost only when the corrective-burden effect survives.
 
