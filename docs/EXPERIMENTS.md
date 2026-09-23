@@ -331,3 +331,24 @@ Reconstructed overall two-attempt success was 306/421 (72.7%) with E029-style
 memory and 355/421 (84.3%) with ranked re-recommendation. This upgrades the E032
 mechanism from exploratory development evidence to an independently replicated
 structured-selection result.
+
+## E035 — Constrained plan scoring
+
+See [E035_CONSTRAINED_PLAN_SCORING.md](E035_CONSTRAINED_PLAN_SCORING.md).
+
+E034 showed the pinned generator cannot *emit* a closed-vocabulary plan. E035
+asks whether it *knows* one: every plan in the E034 plan space is scored by the
+generator's log-probability (plan text plus end-of-turn token, given the
+unchanged E034 prompt) and the best-scoring plan is taken, which is exact
+constrained decoding. Format validity is 100% by construction; the question
+becomes whether the likelihood ranks the restoring plan above chance and above
+the model-free predicate-plus-ranker baseline. Corrective turns are
+deterministic (drop the rejected plan, take the next). Label-free controls:
+length normalisation and cyclic candidate rotation, which cancels the
+candidate-1 position prior E034 exposed.
+
+Mock (no download):
+
+```bash
+python examples/run_plan_scoring_mock.py
+```
