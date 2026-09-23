@@ -192,24 +192,40 @@ jobs:
           hist={"e027":load_one("/tmp/e039/e027/*.json"),"e031":load_one("/tmp/e039/e031/*.json")}
           if len(hist["e027"])!=400 or len(hist["e031"])!=421: raise RuntimeError("historical task-count drift")
 
-          def key(r):
+          def identity(r):
               return (r["repo"],r["source"],r["task"],int(r["answer_index"]),int(r["recommendation_index"]))
-          score_by_pop=defaultdict(dict)
+
+          # A source can contain multiple distinct extracted tasks with the same
+          # compact historical identity fields. Preserve deterministic extractor
+          # order within each held-out repository and verify identity row-by-row
+          # instead of incorrectly requiring those fields to be globally unique.
+          score_groups=defaultdict(list)
           for r in scores:
-              k=key(r)
-              if k in score_by_pop[r["population"]]: raise RuntimeError(f"duplicate score key {k}")
-              score_by_pop[r["population"]][k]=r
+              score_groups[(r["population"],r["repo"])].append(r)
 
           joined={}
           for pop in ("e027","e031"):
-              rows=[]
+              hist_groups=defaultdict(list)
               for h in hist[pop]:
-                  k=key(h)
-                  if k not in score_by_pop[pop]:
-                      raise RuntimeError(f"recommendation identity mismatch or missing score: {pop} {k}")
-                  s=score_by_pop[pop][k]
-                  rows.append({**h,"confidence":s["confidence"],"logits":s["logits"]})
-              if len(rows)!=len(score_by_pop[pop]): raise RuntimeError(f"extra score rows in {pop}")
+                  hist_groups[h["repo"]].append(h)
+              rows=[]
+              repos=sorted(hist_groups)
+              if sorted(repo for p,repo in score_groups if p==pop) != repos:
+                  raise RuntimeError(f"repository identity mismatch in {pop}")
+              for repo in repos:
+                  hs=hist_groups[repo]
+                  ss=score_groups[(pop,repo)]
+                  if len(hs)!=len(ss):
+                      raise RuntimeError(f"row-count mismatch in {pop}/{repo}: {len(hs)} != {len(ss)}")
+                  for i,(h,s) in enumerate(zip(hs,ss)):
+                      if identity(h)!=identity(s):
+                          raise RuntimeError(
+                              f"recommendation identity mismatch at {pop}/{repo} row {i}: "
+                              f"{identity(h)} != {identity(s)}"
+                          )
+                      rows.append({**h,"confidence":s["confidence"],"logits":s["logits"]})
+              if len(rows)!=len(hist[pop]):
+                  raise RuntimeError(f"joined row-count mismatch in {pop}")
               joined[pop]=rows
 
           thresholds=[round(0.25+0.05*i,2) for i in range(15)]
