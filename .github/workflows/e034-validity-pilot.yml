@@ -1,0 +1,327 @@
+name: e034-validity-pilot
+
+on:
+  push:
+    branches: ["analysis/e034-validity-pilot"]
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Restore model cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: e025-qwen05-coderank-${{ runner.os }}-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install model dependencies
+        run: python -m pip install -e ".[hf]"
+      - name: Clone exact E027 revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"
+            sha="$2"
+            dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/recent
+          clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/recent/browser-use
+          clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/recent/crawl4ai
+          clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/recent/markitdown
+          clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/recent/scrapling
+      - name: Run E034 baseline validity pilot
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import time
+          from collections import Counter, defaultdict
+
+          import torch
+          from transformers import AutoModelForCausalLM, AutoTokenizer
+
+          from cdm.argument_ops import (
+              argument_repair_example,
+              build_argument_repair_prompt,
+              corruption_is_label_invariant,
+              operands_in_vocabulary,
+              parse_operation_plan,
+              plan_vocabulary,
+              predicate_census,
+              verify_argument_repair,
+          )
+          from cdm.crossfile import repository_hard_masked_cross_file_call_examples
+          from cdm.methods import repository_hard_masked_method_call_examples
+          from cdm.repository import repository_hard_masked_call_examples
+
+          REPOS = {
+              "browser-use": "/tmp/recent/browser-use",
+              "crawl4ai": "/tmp/recent/crawl4ai",
+              "markitdown": "/tmp/recent/markitdown",
+              "scrapling": "/tmp/recent/scrapling",
+          }
+          MODEL_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+          MODEL_REVISION = "ea3f2471cf1b1f0db85067f1ef93848e38e88c25"
+          K = 4
+          BODY_CHARS = 512
+          TARGET_N = 64
+          SEED = 0
+
+          eligible_rows = []
+          extraction = {}
+          for repo, root in REPOS.items():
+              families = {
+                  "function": repository_hard_masked_call_examples(
+                      root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+                  ),
+                  "method": repository_hard_masked_method_call_examples(
+                      root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+                  ),
+                  "cross_file": repository_hard_masked_cross_file_call_examples(
+                      root, candidate_count=K, candidate_body_chars=BODY_CHARS, seed=0
+                  ),
+              }
+              extraction[repo] = {}
+              for family, examples in families.items():
+                  constructed = 0
+                  invariant = 0
+                  for example in examples:
+                      item = argument_repair_example(example, seed=SEED)
+                      if item is None:
+                          continue
+                      constructed += 1
+                      if not corruption_is_label_invariant(example, seed=SEED):
+                          continue
+                      invariant += 1
+                      eligible_rows.append((repo, family, example, item))
+                  extraction[repo][family] = {
+                      "base_total": len(examples),
+                      "e034_constructed": constructed,
+                      "label_invariant": invariant,
+                  }
+
+          if len(eligible_rows) < TARGET_N:
+              raise RuntimeError(f"only {len(eligible_rows)} eligible E034 tasks; need {TARGET_N}")
+
+          def stable_key(row):
+              repo, family, example, _item = row
+              payload = "\x1f".join([
+                  repo,
+                  family,
+                  example.source,
+                  example.task,
+                  example.context,
+                  *example.candidates,
+              ]).encode("utf-8")
+              return hashlib.sha256(payload).hexdigest()
+
+          by_stratum = defaultdict(list)
+          for row in eligible_rows:
+              by_stratum[(row[0], row[1])].append(row)
+          for key in by_stratum:
+              by_stratum[key].sort(key=stable_key)
+
+          selected = []
+          selected_ids = set()
+          quota = 4
+          for key in sorted(by_stratum):
+              for row in by_stratum[key][:quota]:
+                  sid = stable_key(row)
+                  if sid not in selected_ids:
+                      selected.append(row)
+                      selected_ids.add(sid)
+
+          remaining = sorted(
+              (row for row in eligible_rows if stable_key(row) not in selected_ids),
+              key=stable_key,
+          )
+          selected.extend(remaining[: max(0, TARGET_N - len(selected))])
+          selected = selected[:TARGET_N]
+
+          if len(selected) != TARGET_N:
+              raise RuntimeError(f"selected {len(selected)} tasks, expected {TARGET_N}")
+
+          sample_counts = Counter((repo, family) for repo, family, _, _ in selected)
+          sample_perturbations = Counter(item.perturbation for _, _, _, item in selected)
+
+          # Deterministic baselines are computed before loading or running Qwen.
+          deterministic = []
+          for repo, family, example, item in selected:
+              census = predicate_census(item)
+              deterministic.append({
+                  "repo": repo,
+                  "family": family,
+                  "source": example.source,
+                  "perturbation": item.perturbation,
+                  "plan_space_size": census.plan_space_size,
+                  "binding_plans": census.binding_plans,
+                  "surviving_candidates": census.surviving_candidates,
+                  "predicate_solved": census.solved_by_predicate,
+                  "pure_selection": census.pure_selection,
+                  "restoring_plan_binds": census.restoring_plan_binds,
+              })
+          if not all(r["restoring_plan_binds"] for r in deterministic):
+              raise RuntimeError("restoring plan failed deterministic bindability on selected task")
+
+          tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
+          model = AutoModelForCausalLM.from_pretrained(
+              MODEL_ID, revision=MODEL_REVISION, torch_dtype=torch.float32
+          )
+          model.eval()
+
+          records = []
+          for (repo, family, example, item), det in zip(selected, deterministic):
+              prompt = build_argument_repair_prompt(item)
+              messages = [
+                  {
+                      "role": "system",
+                      "content": (
+                          "You are a precise code repair engine. "
+                          "Answer only with the requested candidate-and-operation plan line."
+                      ),
+                  },
+                  {"role": "user", "content": prompt},
+              ]
+              rendered = tokenizer.apply_chat_template(
+                  messages, tokenize=False, add_generation_prompt=True
+              )
+              inputs = tokenizer(rendered, return_tensors="pt")
+              t0 = time.perf_counter()
+              with torch.inference_mode():
+                  output = model.generate(
+                      **inputs,
+                      max_new_tokens=32,
+                      do_sample=False,
+                      num_beams=1,
+                      pad_token_id=tokenizer.eos_token_id,
+                      eos_token_id=tokenizer.eos_token_id,
+                  )
+              seconds = time.perf_counter() - t0
+              generated = output[0, inputs["input_ids"].shape[-1]:]
+              text = tokenizer.decode(generated, skip_special_tokens=True).strip()
+
+              parsed = parse_operation_plan(text, len(item.example.candidates))
+              syntax_valid = parsed is not None
+              vocab_valid = bool(
+                  parsed is not None
+                  and operands_in_vocabulary(parsed, plan_vocabulary(item.example))
+              )
+              verification = verify_argument_repair(item, text)
+              applicable_valid = (
+                  vocab_valid
+                  and verification.reason not in {"invalid_plan", "inapplicable_operation"}
+              )
+              bindable_valid = verification.reason in {
+                  "ok", "wrong_target", "wrong_operations"
+              }
+              candidate_correct = bool(
+                  vocab_valid and parsed is not None
+                  and parsed.candidate_index == item.example.answer_index
+              )
+              operation_correct = bool(
+                  vocab_valid and parsed is not None
+                  and parsed.operation == item.restoring_plan.operation
+              )
+              records.append({
+                  **det,
+                  "task": example.task,
+                  "answer_index": example.answer_index,
+                  "output": text,
+                  "reason": verification.reason,
+                  "candidate_index": parsed.candidate_index if parsed is not None else None,
+                  "operation": list(parsed.operation) if parsed is not None else None,
+                  "restoring_operation": list(item.restoring_plan.operation),
+                  "syntax_valid": syntax_valid,
+                  "vocabulary_valid": vocab_valid,
+                  "applicable_valid": applicable_valid,
+                  "bindable_valid": bindable_valid,
+                  "candidate_correct": candidate_correct,
+                  "operation_correct": operation_correct,
+                  "exact_success": verification.valid,
+                  "seconds": seconds,
+              })
+
+          def summarize(rs):
+              n = len(rs)
+              reasons = Counter(r["reason"] for r in rs)
+              return {
+                  "n": n,
+                  "syntax_valid": sum(r["syntax_valid"] for r in rs),
+                  "vocabulary_valid": sum(r["vocabulary_valid"] for r in rs),
+                  "applicable_valid": sum(r["applicable_valid"] for r in rs),
+                  "bindable_valid": sum(r["bindable_valid"] for r in rs),
+                  "candidate_correct": sum(r["candidate_correct"] for r in rs),
+                  "operation_correct": sum(r["operation_correct"] for r in rs),
+                  "exact_success": sum(r["exact_success"] for r in rs),
+                  "predicate_solved": sum(r["predicate_solved"] for r in rs),
+                  "pure_selection": sum(r["pure_selection"] for r in rs),
+                  "mean_plan_space_size": (
+                      sum(r["plan_space_size"] for r in rs) / n if n else 0.0
+                  ),
+                  "mean_binding_plans": (
+                      sum(r["binding_plans"] for r in rs) / n if n else 0.0
+                  ),
+                  "mean_surviving_candidates": (
+                      sum(r["surviving_candidates"] for r in rs) / n if n else 0.0
+                  ),
+                  "reasons": dict(sorted(reasons.items())),
+                  "mean_generation_seconds": (
+                      sum(r["seconds"] for r in rs) / n if n else 0.0
+                  ),
+              }
+
+          summary = {
+              "model": MODEL_ID,
+              "revision": MODEL_REVISION,
+              "tasks": len(records),
+              "seed": SEED,
+              "selection": (
+                  "label-free stable hash; quota 4 per repo x family stratum, "
+                  "then global fill"
+              ),
+              "sample_counts": {
+                  f"{repo}:{family}": count
+                  for (repo, family), count in sorted(sample_counts.items())
+              },
+              "sample_perturbations": dict(sorted(sample_perturbations.items())),
+              "overall": summarize(records),
+              "by_family": {
+                  family: summarize([r for r in records if r["family"] == family])
+                  for family in sorted({r["family"] for r in records})
+              },
+              "by_repo": {
+                  repo: summarize([r for r in records if r["repo"] == repo])
+                  for repo in sorted({r["repo"] for r in records})
+              },
+              "by_perturbation": {
+                  perturbation: summarize(
+                      [r for r in records if r["perturbation"] == perturbation]
+                  )
+                  for perturbation in sorted({r["perturbation"] for r in records})
+              },
+              "extraction": extraction,
+          }
+
+          with open("/tmp/e034-validity-pilot.json", "w", encoding="utf-8") as handle:
+              json.dump(
+                  {"summary": summary, "records": records},
+                  handle, indent=2, sort_keys=True
+              )
+          print("E034_VALIDITY_PILOT=" + json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e034-validity-pilot
+          path: /tmp/e034-validity-pilot.json
