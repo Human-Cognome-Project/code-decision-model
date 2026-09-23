@@ -2,9 +2,12 @@
 """E040 census: how large is the real decision behind each hard task?
 
 For every hard same-file and cross-file task in a repository, reports the size
-of the candidate pool a local assistant actually faces at two levels, how far
+of the candidate pool at two levels in distinct candidate renderings, how far
 the E024 binding predicate prunes each, how that compares with the extractor's
-shape-matched negatives, and whether the labelled target is recovered:
+shape-matched negatives, how many of the frozen task's own wrong candidates
+are in the caller's scope, whether the target is in scope without the masked
+call's own import line, and how many tasks are ambiguous at repository scale
+because another function renders identically to the target:
 
 - scope pool: module-level functions in the caller's file plus resolvable
   from-imports, caller excluded;
@@ -41,8 +44,16 @@ def report(label: str, examples, scope) -> None:
         print()
         return
     print(f"protocol candidates per task:       {census[0].protocol_candidates}")
-    print(f"target in scope / bindable / repo:  {sum(c.target_in_scope for c in census)}/{n}  "
+    print(f"consistency: target in scope / bindable / repo:  {sum(c.target_in_scope for c in census)}/{n}  "
           f"{sum(c.target_bindable_in_scope for c in census)}/{n}  {sum(c.target_in_repository for c in census)}/{n}")
+    negatives = sum(c.protocol_candidates - 1 for c in census)
+    print(f"protocol negatives in caller scope: {sum(c.protocol_negatives_in_scope for c in census)}/{negatives}")
+    resolved = sum(c.scope_filter_resolves_protocol for c in census)
+    print(f"scope filter alone resolves task:   {resolved}/{n} ({100.0 * resolved / n:.1f}%)")
+    independent = sum(c.target_in_scope_independently for c in census)
+    print(f"target in scope without its call:   {independent}/{n}")
+    both = sum(c.scope_filter_resolves_protocol_independently for c in census)
+    print(f"  scope filter resolves, too:       {both}/{n} ({100.0 * both / n:.1f}%)")
     print(_line("scope pool size:", (c.scope_size for c in census)))
     print(_line("  of which imported:", (c.scope_imported for c in census)))
     print(_line("  E024-bindable:", (c.scope_bindable for c in census)))
@@ -53,6 +64,8 @@ def report(label: str, examples, scope) -> None:
     print(f"scope bindable <= protocol count:   {at_most_protocol}/{n} ({100.0 * at_most_protocol / n:.1f}%)")
     print(_line("repository pool size:", (c.repository_size for c in census)))
     print(_line("  E024-bindable:", (c.repository_bindable for c in census)))
+    ambiguous = sum(not c.target_unique_in_repository for c in census)
+    print(f"ambiguous at repository scale:      {ambiguous}/{n}")
     widened = pool_examples(examples, scope)
     repo_wide = pool_examples(examples, scope, level="repository")
     print(f"pool-complete tasks (scope):        {len(widened)}   mean candidates {mean(len(w.candidates) for w in widened):.1f}")

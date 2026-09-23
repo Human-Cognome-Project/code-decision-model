@@ -17,12 +17,26 @@ This module makes both pools explicit and deterministic, without a model:
 - **repository pool**: every top-level function in the repository other than
   the caller.
 
-For each existing hard task the census reports the pool sizes, how many pool
-members the E024 binding predicate leaves, how many share the target's call
-shape (the extractor's own notion of a hard negative), and whether the target
-is recovered at all, which it must be for the task to be well posed. That is
-the retrieval side of OPEN_DIRECTIONS' two-stage path, measured separately
-from ranking accuracy so a miss cannot hide inside decision accuracy.
+Both pools contain repository-defined top-level functions only. Builtins,
+classes, names imported from outside the repository, and other module-level
+callables are not included, so each pool is a lower bound on what the masked
+call could legally name.
+
+A candidate is identified by its rendered text, which is all a scorer sees.
+Functions with identical renderings in different files are one candidate; a
+task whose target shares its rendering with another pool member is ambiguous
+at that level and is not re-posed.
+
+For each existing hard task the census reports pool sizes in distinct
+renderings, how many the E024 binding predicate leaves, how many share the
+target's call shape, how many of the task's own protocol negatives are in the
+caller's scope, and whether the target is in scope independently of the masked
+call. A cross-file target is in scope through an import line; when no other
+code in the file reads that alias, the import exists only because of the
+masked call, which is the information E030 withholds from the scorer. Target
+recovery is also reported, but it is a consistency check rather than a
+finding: the extractors label from the same symbol collection and resolver,
+so a miss means a bug, not a retrieval failure.
 
 ``pool_example`` then re-poses any existing task over its bindable pool, so
 the frozen scorer can be evaluated at pool scale by whoever runs it live;
@@ -51,6 +65,22 @@ def render_symbol(symbol: PythonSymbol, *, body_chars: int = DEFAULT_BODY_CHARS)
     return f"{symbol.signature}\n{symbol.body[:body_chars]}"
 
 
+def distinct_by_rendering(
+    symbols: Sequence[PythonSymbol],
+    *,
+    body_chars: int = DEFAULT_BODY_CHARS,
+) -> tuple[tuple[PythonSymbol, ...], dict[str, int]]:
+    """First symbol per distinct rendering, plus how many symbols share each rendering."""
+    counts: dict[str, int] = {}
+    kept: list[PythonSymbol] = []
+    for symbol in symbols:
+        text = render_symbol(symbol, body_chars=body_chars)
+        counts[text] = counts.get(text, 0) + 1
+        if counts[text] == 1:
+            kept.append(symbol)
+    return tuple(kept), counts
+
+
 def caller_name(example: DecisionExample) -> str:
     """The masked caller's function name, read from the task context."""
     tree = ast.parse(example.context)
@@ -71,6 +101,10 @@ class InScopePool:
 
     imported: tuple[PythonSymbol, ...]
     """From-imported top-level functions resolved elsewhere in the repository."""
+
+    imported_used_elsewhere: tuple[PythonSymbol, ...] = ()
+    """Imported members whose alias is also read outside the caller, so the
+    import would exist even if the caller's own call to it were not yet written."""
 
     @property
     def symbols(self) -> tuple[PythonSymbol, ...]:
@@ -149,14 +183,34 @@ def in_scope_pools(
             symbol for alias, symbol in sorted(imports.items())
             if alias not in local_names
         )
+        aliases = {alias: symbol for alias, symbol in imports.items() if alias not in local_names}
         for caller in local_symbols:
+            outside = _names_read_outside(tree, caller.name)
             pools[(source_name, caller.name)] = InScopePool(
                 source=source_name,
                 caller=caller.name,
                 local=tuple(symbol for symbol in local_symbols if symbol != caller),
                 imported=imported,
+                imported_used_elsewhere=tuple(
+                    symbol for alias, symbol in sorted(aliases.items()) if alias in outside
+                ),
             )
     return RepositoryScope(pools=pools, all_symbols=all_symbols)
+
+
+def _names_read_outside(tree: ast.Module, caller: str) -> frozenset[str]:
+    """Names read by module-level statements other than the caller's definition and imports."""
+    names: set[str] = set()
+    for statement in tree.body:
+        if isinstance(statement, (ast.Import, ast.ImportFrom)):
+            continue
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)) and statement.name == caller:
+            continue
+        names.update(
+            node.id for node in ast.walk(statement)
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+        )
+    return frozenset(names)
 
 
 # ---------------------------------------------------------------------------
@@ -193,29 +247,74 @@ def target_symbol(
 
 @dataclass(frozen=True)
 class PoolCensus:
-    """The retrieval stage for one task, at both pool levels."""
+    """The retrieval stage for one task, at both pool levels.
+
+    Sizes count distinct candidate renderings, which is what a scorer sees.
+    """
 
     protocol_candidates: int
     """Candidates the frozen task actually shows (four in the protocol)."""
 
+    protocol_negatives_in_scope: int
+    """How many of the task's own wrong candidates are in the caller's scope pool."""
+
     scope_size: int
     scope_local: int
     scope_imported: int
+    """Local and imported member counts before rendering deduplication."""
+
     scope_bindable: int
     scope_shape_matched: int
-    """Scope members sharing the target's call shape (the extractor's negatives)."""
+    """Distinct scope renderings sharing the target's call shape (the extractor's negatives)."""
 
     target_in_scope: bool
     target_bindable_in_scope: bool
+    target_unique_in_scope: bool
+    """No other bindable scope member has the target's rendering."""
+
+    target_in_scope_independently: bool
+    """The target is in scope without the caller's own call: defined in the
+    caller's file, or imported under an alias that is read outside the caller.
+    For a cross-file target otherwise, scope membership rests on an import
+    line that exists only because of the masked call."""
 
     repository_size: int
     repository_bindable: int
     target_in_repository: bool
+    target_unique_in_repository: bool
+    """No other bindable repository member has the target's rendering."""
 
     @property
     def scope_solved_by_predicate(self) -> bool:
         """Bindability alone leaves only the target in scope."""
         return self.target_bindable_in_scope and self.scope_bindable == 1
+
+    @property
+    def scope_filter_resolves_protocol(self) -> bool:
+        """Dropping out-of-scope candidates from the frozen task leaves only the target."""
+        return self.target_in_scope and self.protocol_negatives_in_scope == 0
+
+    @property
+    def scope_filter_resolves_protocol_independently(self) -> bool:
+        """The scope filter resolves the task without relying on the target's own import."""
+        return self.scope_filter_resolves_protocol and self.target_in_scope_independently
+
+
+def _level_counts(
+    example: DecisionExample,
+    symbols: Sequence[PythonSymbol],
+    *,
+    body_chars: int,
+) -> tuple[int, int, bool, bool, bool, tuple[PythonSymbol, ...]]:
+    """(distinct size, distinct bindable, target present, target bindable, target unique, bindable distinct)."""
+    distinct, _ = distinct_by_rendering(symbols, body_chars=body_chars)
+    mask = bindable_mask(example, symbols, body_chars=body_chars)
+    bindable = [symbol for symbol, ok in zip(symbols, mask) if ok]
+    bindable_distinct, bindable_counts = distinct_by_rendering(bindable, body_chars=body_chars)
+    wanted = example.candidates[example.answer_index]
+    present = target_symbol(example, symbols, body_chars=body_chars) is not None
+    count = bindable_counts.get(wanted, 0)
+    return len(distinct), len(bindable_distinct), present, count >= 1, count == 1, bindable_distinct
 
 
 def pool_census(
@@ -229,27 +328,33 @@ def pool_census(
     if pool is None:
         return None
     symbols = pool.symbols
-    scope_mask = bindable_mask(example, symbols, body_chars=body_chars)
+    size, bindable, present, target_bindable, unique, _ = _level_counts(example, symbols, body_chars=body_chars)
     target = target_symbol(example, symbols, body_chars=body_chars)
-    target_bindable = bool(target is not None and scope_mask[symbols.index(target)])
-    shape_matched = 0
-    if target is not None:
-        shape_matched = sum(symbol.call_shape == target.call_shape for symbol in symbols)
+    distinct, _ = distinct_by_rendering(symbols, body_chars=body_chars)
+    shape_matched = 0 if target is None else sum(s.call_shape == target.call_shape for s in distinct)
+    in_scope = {render_symbol(s, body_chars=body_chars) for s in symbols}
+    negatives = [c for i, c in enumerate(example.candidates) if i != example.answer_index]
 
     repository = scope.repository_pool(example)
-    repository_mask = bindable_mask(example, repository, body_chars=body_chars)
+    r_size, r_bindable, r_present, _, r_unique, _ = _level_counts(example, repository, body_chars=body_chars)
     return PoolCensus(
         protocol_candidates=len(example.candidates),
-        scope_size=len(symbols),
+        protocol_negatives_in_scope=sum(c in in_scope for c in negatives),
+        scope_size=size,
         scope_local=len(pool.local),
         scope_imported=len(pool.imported),
-        scope_bindable=sum(scope_mask),
+        scope_bindable=bindable,
         scope_shape_matched=shape_matched,
-        target_in_scope=target is not None,
+        target_in_scope=present,
         target_bindable_in_scope=target_bindable,
-        repository_size=len(repository),
-        repository_bindable=sum(repository_mask),
-        target_in_repository=target_symbol(example, repository, body_chars=body_chars) is not None,
+        target_unique_in_scope=unique,
+        target_in_scope_independently=target is not None and target.candidate in {
+            symbol.candidate for symbol in pool.local + pool.imported_used_elsewhere
+        },
+        repository_size=r_size,
+        repository_bindable=r_bindable,
+        target_in_repository=r_present,
+        target_unique_in_repository=r_unique,
     )
 
 
@@ -269,12 +374,15 @@ def pool_example(
 ) -> DecisionExample | None:
     """The same task posed over its bindable pool at ``level``.
 
-    With ``candidate_count`` None every bindable pool member is a candidate,
-    which is the repository-scale decision itself. Otherwise the target plus
-    ``candidate_count - 1`` bindable negatives are drawn by the same stable
-    hash convention the hard extractors use. Candidate order is a stable
-    shuffle. Returns None if the target is not a bindable member of the pool
-    or the pool cannot fill the requested count.
+    Candidates are distinct renderings. With ``candidate_count`` None every
+    distinct bindable rendering is a candidate, which is the pool-scale
+    decision itself. Otherwise the target plus ``candidate_count - 1``
+    bindable negatives are drawn by the same stable hash convention the hard
+    extractors use. Candidate order is a stable shuffle.
+
+    Returns None when the target is not a bindable pool member, when another
+    bindable member has the same rendering as the target (the label would be
+    ambiguous), or when the pool cannot fill the requested count.
     """
     if level not in LEVELS:
         raise ValueError(f"unknown pool level {level!r}")
@@ -283,11 +391,10 @@ def pool_example(
     symbols = scope.level_pool(example, level)
     if symbols is None:
         return None
-    mask = bindable_mask(example, symbols, body_chars=body_chars)
-    bindable = [symbol for symbol, ok in zip(symbols, mask) if ok]
-    target = target_symbol(example, bindable, body_chars=body_chars)
-    if target is None:
+    _, _, _, target_bindable, unique, bindable = _level_counts(example, symbols, body_chars=body_chars)
+    if not (target_bindable and unique):
         return None
+    target = target_symbol(example, bindable, body_chars=body_chars)
 
     rng = _stable_rng(seed, "in-scope-pool", level, example.source, caller_name(example), target.candidate)
     negatives = [symbol for symbol in bindable if symbol != target]

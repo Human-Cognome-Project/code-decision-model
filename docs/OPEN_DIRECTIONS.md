@@ -177,6 +177,11 @@ Measure separately:
 
 Do not hide retrieval misses inside decision accuracy.
 
+E040 measured the deterministic retrieval stage without a model: in-scope and
+repository pools per task, E024 pruning, and pool-complete re-posed tasks. Its
+live half, the frozen scorer ranking the real pool, is specified in the stop condition of
+[E040_IN_SCOPE_POOLS.md](E040_IN_SCOPE_POOLS.md) and not yet run.
+
 ## Confidence and escalation
 
 E020 falsified raw Potion cosine margin as a useful general routing signal.

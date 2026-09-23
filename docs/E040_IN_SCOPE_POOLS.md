@@ -21,22 +21,41 @@ For a masked direct call `__CALL_TARGET__(...)` inside a module-level function,
   `from ... import ...` statement that resolves, under the E030 conservative
   resolver, to a top-level function in another file of the repository, with
   aliases that are shadowed by a local definition excluded. This is what the
-  callee could legally be without editing the imports.
+  callee could be without editing the imports.
 - **repository pool**: every top-level function in the repository other than
   the caller. This is what the callee could be if the assistant may also add an
   import.
 
-Both are functions of the file's source and the repository's files only. The
-label is read afterwards, to ask whether the target is in the pool.
+Both pools contain repository-defined top-level functions only. Builtins,
+classes, names imported from outside the repository, and other module-level
+callables are left out, so each pool is a lower bound on what the masked call
+could legally name.
 
-For each pool the census reports its size, how many members the E024 binding
-predicate leaves (`CallSiteBindable` over the same renderings the hard
-extractors use), how many share the target's call shape (the extractor's own
-notion of a hard negative), and whether the labelled target is recovered at all
-and is bindable. Recovery must be total, since the extractors label from the
-same symbol collection and the same resolver; the test suite asserts it on this
-repository's corpora, so a resolver regression would fail the suite rather
-than silently shrink recall.
+A candidate is identified by its rendered text, which is all a scorer sees.
+Functions with identical renderings in different files are one candidate, and
+sizes count distinct renderings. A task whose target shares its rendering with
+another bindable pool member is ambiguous at that level and is not re-posed.
+
+Both pools are functions of the file's source and the repository's files only.
+The label is read afterwards. For each pool the census reports its size, how
+many members the E024 binding predicate leaves (`CallSiteBindable` over the
+same renderings the hard extractors use), and how many share the target's call
+shape (the extractor's own notion of a hard negative). It also reports:
+
+- **protocol negatives in scope**: how many of the frozen task's own wrong
+  candidates are in the caller's scope pool. When none are, dropping
+  out-of-scope names from the frozen task leaves only the target, with no
+  model.
+- **target in scope independently**: whether the target would be in scope
+  without the masked call. A same-file target always is. A cross-file target
+  is in scope through its import line, and when no other code in the file
+  reads that alias, the import exists only because of the masked call. E030
+  deliberately withholds that import from the scorer's context, so a scope
+  filter that relies on it reads the answer.
+- **target recovery**: whether the labelled target is in each pool and
+  bindable. This is a consistency check, not a finding. The extractors label
+  from the same symbol collection and resolver, so a miss means a bug, and
+  the test suite asserts full recovery on this repository's corpora.
 
 `pool_example` then re-poses any existing task over its bindable pool at either
 level, keeping the context, question and truth, so the frozen scorer can be
@@ -46,37 +65,63 @@ negatives, drawn by the extractors' stable-hash convention.
 
 ## Census on this repository (four-candidate protocol)
 
-| Family | Tasks | Target in scope / bindable / repository | Scope pool | Scope E024-bindable | Same shape as target | Scope solved by predicate | Bindable ≤ 4 | Repository pool | Repository E024-bindable |
-| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| same-file functions (E006) | 101 | 101 / 101 / 101 | mean 18.6, median 14, max 41 | mean 10.2, median 7, max 20 | mean 9.5, median 6 | 0/101 | 14/101 (14%) | 508 | mean 200, median 241 |
-| cross-file functions (E030) | 118 | 118 / 118 / 118 | mean 15.7, median 10, max 41 | mean 4.2, median 2, max 20 | mean 2.7, median 1 | 57/118 (48%) | 88/118 (75%) | 508 | mean 71, median 16 |
+`python examples/census_in_scope_pools.py`
+
+The corpus is this repository's own source, tests included, at this commit:
+515 top-level functions, 509 distinct renderings once the caller is excluded.
+Adding code changes the numbers, and the script reproduces them.
+
+| Measure | Same-file functions (E006) | Cross-file functions (E030) |
+| --- | --- | --- |
+| Tasks | 103 | 118 |
+| Consistency: target in scope, bindable, in repository | 103, 103, 103 | 118, 118, 118 |
+| Protocol negatives in caller scope | 309/309 | 12/354 |
+| Scope filter alone resolves the frozen task | 0/103 | 106/118 (89.8%) |
+| Target in scope without its own call | 103/103 | 91/118 |
+| Scope filter resolves, target in scope independently | 0/103 | 82/118 (69.5%) |
+| Scope pool size | mean 18.6, median 18, max 41 | mean 15.7, median 10, max 41 |
+| Scope E024-bindable | mean 10.3, median 9, max 20 | mean 4.2, median 2, max 20 |
+| Scope, same call shape as target | mean 9.6, median 6, max 20 | mean 2.7, median 1, max 14 |
+| Scope solved by predicate alone | 0/103 | 57/118 (48.3%) |
+| Scope bindable ≤ 4 | 14/103 (13.6%) | 88/118 (74.6%) |
+| Repository E024-bindable | mean 199.3, median 241 | mean 71.2, median 15, max 161 |
+| Ambiguous at repository scale | 2/103 | 0/118 |
+| Pool-complete tasks, scope level | 103, mean 10.3 candidates | 118, mean 4.2 candidates |
+| Pool-complete tasks, repository level | 101, mean 200.1 candidates | 118, mean 71.2 candidates |
 
 Reading:
 
-- **Recall is total.** Every labelled target is in its scope pool, bindable,
-  and in the repository pool. The retrieval stage as defined here never loses
-  the answer, so any live pool-scale result is purely about ranking.
-- **The same-file decision is about two and a half times the protocol.** After
-  bindability, a same-file caller still has ten legal callees in scope on
-  average, and only 14% of tasks are within the protocol's four. Bindability
-  alone never resolves a same-file task, and it leaves about as many members as
-  the extractor's shape matching does: the two prune the same way. The frozen
-  four-candidate result therefore measures the ranking problem at less than
-  half its in-scope size.
-- **The cross-file decision is mostly small.** Cross-file callees are rarer in
-  scope; bindability leaves two on median, resolves 48% of tasks outright, and
-  75% of tasks are within four. Here the protocol is close to the real
-  in-scope decision.
-- **Repository scale is a different problem.** Bindability prunes the 508
-  repository functions to about 200 for a same-file call and to 16 on median
-  for a cross-file call. A local assistant that may add imports faces a
-  decision one to two orders of magnitude larger than the protocol, and the
-  binding predicate is far from enough to shortlist it. That is the case for
-  a real retrieval stage in front of the scorer, and it says the scorer's
-  pool-scale behaviour, not its four-way behaviour, is what the product needs.
-
-The corpus is this repository's own source, so numbers shift as the code
-changes; the census script reproduces them.
+- **The same-file protocol is a sample of the in-scope decision.** Every
+  protocol negative is in the caller's scope, so the frozen task is four
+  members of a scope decision that averages ten bindable candidates. Only 14%
+  of tasks are within four. Bindability never resolves a same-file task and
+  prunes about as far as the extractor's shape matching does. The frozen
+  four-candidate result therefore measures same-file ranking at less than half
+  its in-scope size.
+- **The cross-file protocol is not the in-scope decision.** E030 draws
+  negatives from the whole repository, and 342 of its 354 negatives are names
+  the caller cannot reach without a new import. A scope filter that reads the
+  file's imports resolves 89.8% of the frozen cross-file tasks with no model.
+  That filter partly reads the answer: in 27 tasks the target's import is read
+  nowhere else in the file, which is the leak E030 removes from the context.
+  Counting only targets in scope independently of the masked call, the scope
+  filter still resolves 69.5%. Any E030 scorer result is therefore a result on
+  a decision that a scope-aware assistant would mostly not face, and it must be
+  reported against this baseline as well as the E030 predicate-plus-uniform
+  baseline.
+- **The real cross-file decisions are small or large, not four.** At scope
+  level the decision has two bindable candidates on median and the predicate
+  alone resolves 48% of tasks, though for 27 tasks that scope contains the
+  target only through the withheld import. When the import does not already
+  exist, the assistant faces the repository pool: 15 bindable candidates on
+  median and up to 161.
+- **Repository scale is a different problem.** Bindability prunes the 509
+  distinct repository functions to about 200 for a same-file call. A local
+  assistant that may add imports faces a decision one to two orders of
+  magnitude larger than the protocol, and the binding predicate is far from
+  enough to shortlist it. That is the case for a real retrieval stage in front
+  of the scorer. Two same-file targets render identically to another function
+  and are not re-posed at this level.
 
 ## What this tests, per the contribution rule
 
@@ -85,20 +130,25 @@ changes; the census script reproduces them.
    it, and does the frozen scorer's advantage survive when it must rank the
    real pool rather than four shape-matched candidates?
 2. **Deterministic signal**: pool membership and size from the AST and the
-   E030 resolver; E024 bindability; target recovery, asserted by the test
-   suite.
-3. **Comparison**: the four-candidate protocol on the same decisions; uniform
-   choice over the bindable pool as chance at pool scale; the predicate-alone
-   count.
+   E030 resolver; E024 bindability; distinct renderings; whether the target's
+   import is read outside the caller. Target recovery is asserted by the test
+   suite as a consistency check.
+3. **Comparison**: the four-candidate protocol on the same decisions; the
+   scope filter alone on the frozen task; uniform choice over the bindable
+   pool as chance at pool scale, which already includes both the scope filter
+   and the predicate; the predicate-alone count.
 4. **Stop condition**: the measurement half is complete with this PR and the
-   census above. The live half is a preregistered pool-scale run of the frozen
-   E027 scorer on `pool_example` tasks over the E031 repositories, reported as
-   top-1 accuracy at scope scale against uniform-over-bindable-pool chance,
-   then paired corrective burden as in E031. If scope-scale top-1 accuracy
-   does not beat chance by a clustered confidence interval, the scorer's
-   four-way result does not transfer to the real decision and the next step
-   is a retrieval stage, not more ranking. If it does, repository-scale is the
-   following gate.
+   census above. The live half, to be preregistered before it runs, is a
+   pool-scale run of the frozen E027 scorer on pool-complete `pool_example`
+   tasks over the E031 repositories, reported as top-1 accuracy against
+   uniform-over-bindable-pool chance, then paired corrective burden as in E031.
+   Same-file tasks are run at scope level. Cross-file tasks are run at scope
+   level only when the target is in scope independently of the masked call, and
+   at repository level otherwise, so no scope-level result rests on the
+   withheld import. If scope-level top-1 accuracy does not beat chance by a
+   clustered confidence interval, the scorer's four-way result does not
+   transfer to the real decision and the next step is a retrieval stage, not
+   more ranking. If it does, repository level is the following gate.
 
 ## Implementation
 
@@ -106,11 +156,15 @@ changes; the census script reproduces them.
 
 - `in_scope_pools(root, *, source_roots=("src",))`: one `InScopePool` per
   module-level function, keyed by (file, caller), reusing the E006 symbol
-  collection and the E030 import resolver.
-- `RepositoryScope.pool_for(example)` / `repository_pool(example)`: the two
-  pools for a task, the caller read from the task context.
-- `bindable_mask`, `target_symbol`, `pool_census` → `PoolCensus`.
-- `pool_example` / `pool_examples`: the task re-posed over its bindable pool.
+  collection and the E030 import resolver. Each pool records which imported
+  members are read outside the caller.
+- `RepositoryScope.pool_for`, `repository_pool` and `level_pool`: the pools
+  for a task, the caller read from the task context.
+- `distinct_by_rendering`, `bindable_mask`, `target_symbol`, and
+  `pool_census`, which returns a `PoolCensus`.
+- `pool_example` and `pool_examples`: the task re-posed over its bindable
+  pool, or None when the target is not bindable, is ambiguous, or the pool
+  cannot fill the requested count.
 
 Nothing here trains, scores, or calls a model. `examples/census_in_scope_pools.py`
-prints the table above for any repository.
+prints the census for any repository.

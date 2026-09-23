@@ -152,6 +152,74 @@ def test_target_outside_bindable_pool_yields_none(repo: Path):
     assert not pool_census(foreign, scope).target_in_scope
 
 
+def test_identical_functions_in_two_files_are_one_candidate(tmp_path: Path):
+    _write_repo(tmp_path)
+    # A byte-identical copy of `two` elsewhere: a scorer cannot tell them apart.
+    (tmp_path / "pkg" / "d.py").write_text("def two(x, y):\n    return x + y\n\ndef three(x, y):\n    return x * y\n")
+    scope = in_scope_pools(tmp_path)
+    example = repository_hard_masked_call_examples(tmp_path, candidate_count=4)[0]
+    assert example.candidates[example.answer_index].startswith("two(")
+
+    census = pool_census(example, scope)
+    assert census.target_unique_in_scope  # the copy is not in the caller's scope
+    assert not census.target_unique_in_repository
+    # Distinct renderings: d.py adds nothing new, so the repository size is unchanged.
+    assert census.repository_size == 10
+
+    assert pool_example(example, scope) is not None
+    assert pool_example(example, scope, level="repository") is None  # ambiguous label
+
+    # Negative-only duplicates are collapsed, not rejected.
+    (tmp_path / "pkg" / "d.py").write_text("def three(x, y):\n    return x * y\n")
+    scope = in_scope_pools(tmp_path)
+    widened = pool_example(example, scope, level="repository")
+    assert widened is not None and len(set(widened.candidates)) == len(widened.candidates)
+    assert widened.candidates[widened.answer_index] == example.candidates[example.answer_index]
+
+
+def test_protocol_negatives_in_scope_and_the_scope_filter(repo: Path):
+    scope = in_scope_pools(repo)
+    same_file = repository_hard_masked_call_examples(repo, candidate_count=4)[0]
+    census = pool_census(same_file, scope)
+    assert census.protocol_negatives_in_scope == 3 and not census.scope_filter_resolves_protocol
+
+    cross = repository_hard_masked_cross_file_call_examples(repo, candidate_count=2)[0]
+    census = pool_census(cross, scope)
+    negative = cross.candidates[1 - cross.answer_index]
+    in_scope = {render_symbol(s) for s in scope.pool_for(cross).symbols}
+    assert census.protocol_negatives_in_scope == int(negative in in_scope)
+    assert census.scope_filter_resolves_protocol == (negative not in in_scope)
+
+
+def test_target_in_scope_independently_of_the_masked_call(tmp_path: Path):
+    _write_repo(tmp_path)
+    (tmp_path / "pkg" / "e.py").write_text(
+        "from pkg.a import two, three\n\n"
+        "def first(v):\n    return two(v, v)\n\n"
+        "def second(v):\n    return two(v, 1)\n\n"
+        "LIMIT = three(2, 3)\n"
+    )
+    scope = in_scope_pools(tmp_path)
+    # `two` is read by the other function and `three` by a module-level
+    # assignment, so both imports exist independently of `first`.
+    assert [s.name for s in scope.pools[("pkg/e.py", "first")].imported_used_elsewhere] == ["three", "two"]
+    # In pkg/b.py only `user` reads `two`, and nothing reads `uno`.
+    assert scope.pools[("pkg/b.py", "user")].imported_used_elsewhere == ()
+    assert [s.name for s in scope.pools[("pkg/b.py", "lonely")].imported_used_elsewhere] == ["two"]
+
+    same_file = repository_hard_masked_call_examples(tmp_path, candidate_count=4)
+    census = pool_census(next(e for e in same_file if e.source == "pkg/a.py"), scope)
+    assert census.target_in_scope_independently  # a same-file target is always in scope
+
+    for example in repository_hard_masked_cross_file_call_examples(tmp_path, candidate_count=2):
+        census = pool_census(example, scope)
+        independent = (example.source, caller_name(example)) in {("pkg/e.py", "first"), ("pkg/e.py", "second")}
+        assert census.target_in_scope_independently == independent, (example.source, caller_name(example))
+        assert census.scope_filter_resolves_protocol_independently == (
+            census.scope_filter_resolves_protocol and independent
+        )
+
+
 def test_this_repository_recovers_every_hard_target_in_scope():
     root = Path(__file__).resolve().parents[1]
     scope = in_scope_pools(root)
@@ -166,8 +234,15 @@ def test_this_repository_recovers_every_hard_target_in_scope():
         assert census.target_in_scope and census.target_bindable_in_scope and census.target_in_repository, example.source
         assert census.scope_bindable <= census.scope_size <= census.repository_size + 1
         assert census.repository_bindable <= census.repository_size
-        # The protocol's four candidates never exceed what is actually in scope and bindable.
-        assert census.protocol_candidates <= max(census.scope_bindable, census.protocol_candidates)
     widened = pool_examples(examples, scope)
     assert len(widened) == len(examples)
     assert all(w.candidates[w.answer_index] == e.candidates[e.answer_index] for w, e in zip(widened, examples))
+    # Repository level: every re-posed task has distinct candidates, and the
+    # only tasks dropped are those whose target rendering is ambiguous.
+    repository = [pool_example(e, scope, level="repository") for e in examples]
+    for example, posed in zip(examples, repository):
+        census = pool_census(example, scope)
+        assert (posed is None) == (not census.target_unique_in_repository), example.source
+        if posed is not None:
+            assert len(set(posed.candidates)) == len(posed.candidates)
+            assert posed.candidates[posed.answer_index] == example.candidates[example.answer_index]

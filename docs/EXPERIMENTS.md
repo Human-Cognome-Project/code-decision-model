@@ -412,12 +412,20 @@ The retrieval stage of OPEN_DIRECTIONS' two-stage path, measured without a
 model. For every hard same-file and cross-file task, `cdm.scope` builds the
 candidate pool a local assistant actually faces at two levels: everything in
 scope in the caller's file (module-level functions plus resolvable
-from-imports) and every top-level function in the repository. The census
-reports pool sizes, how far E024 bindability prunes each, how that compares
-with the extractor's shape-matched negatives, and whether the target is
-recovered (it must be; the test suite asserts it). `pool_example` re-poses any
+from-imports) and every top-level function in the repository. Both pools are
+lower bounds and count distinct candidate renderings. The census reports pool
+sizes, how far E024 bindability prunes each, how many of the frozen task's
+negatives are in the caller's scope, and whether a cross-file target is in
+scope independently of its own withheld import. `pool_example` re-poses any
 task over its bindable pool so the frozen scorer can be evaluated at pool
 scale.
+
+On this repository the same-file protocol is a four-member sample of an
+in-scope decision averaging ten bindable candidates. The cross-file protocol
+is not the in-scope decision: a scope filter alone resolves most frozen E030
+tasks, 69.5% even when counting only targets whose import exists
+independently of the masked call. Cross-file scorer results must be reported
+against that baseline. The live pool-scale run is not yet done.
 
 Census:
 
