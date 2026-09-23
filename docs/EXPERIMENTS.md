@@ -333,6 +333,41 @@ mechanism from exploratory development evidence to an independently replicated
 structured-selection result.
 
 
+## E036 — Constrained plan scoring
+
+See [E036_CONSTRAINED_PLAN_SCORING.md](E036_CONSTRAINED_PLAN_SCORING.md).
+
+E034 showed the pinned generator cannot *emit* a closed-vocabulary plan. E036
+asks whether it *knows* one: every plan in the E034 plan space is scored by the
+generator's log-probability of its canonical token sequence (the plan text
+tokenised on its own plus the end-of-turn token, after the frozen E034 prompt
+tokens) and the best-scoring plan is taken. This is canonical continuation
+likelihood ranking, not exact grammar-constrained decoding, which would sum
+over every tokenisation of a plan. Format validity is 100% by construction; the question
+becomes whether the likelihood ranks the restoring plan above chance and above
+the model-free predicate-plus-ranker baseline. Corrective turns are
+deterministic (drop the rejected plan, take the next). Label-free controls:
+length normalisation and cyclic candidate rotation, which cancels the
+candidate-1 position prior E034 exposed.
+
+Mock (no download):
+
+```bash
+python examples/run_plan_scoring_mock.py
+```
+
+## E037 — Second-generator replication
+
+See [E037_SECOND_GENERATOR_PREREG.md](E037_SECOND_GENERATOR_PREREG.md).
+
+Preregisters a generator-dependence replication of the frozen E031
+structured-selection intervention using HuggingFaceTB/SmolLM2-360M-Instruct at
+pinned revision `cbcad7f4d160a10174f725b968ab6faf2a76399e`. The E031 repository
+set, decision scorer, prompt/parser, two-attempt budget, and paired statistics
+remain frozen. Ranked re-recommendation is deliberately excluded and, if
+warranted, will be tested separately.
+
+
 ## E037 — Second-generator replication
 
 See [E037_SECOND_GENERATOR_PREREG.md](E037_SECOND_GENERATOR_PREREG.md).
