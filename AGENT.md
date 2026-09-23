@@ -36,7 +36,8 @@ The completed confirmatory evidence now includes **E031**, the preregistered dev
 - **E033:** call-expression intent reached only 36/64 parse-valid calls, 23/64 uniquely resolved/bindable calls, and 2/64 exact repairs in a baseline-only validity pilot. Stop this free-form call surface for the 0.5B generator; do not rescue it with permissive deterministic reconstruction.
 - **E034:** the closed-vocabulary one-operation successor failed even earlier: 11/64 syntax-valid plans, 2/64 bindable plans, 0/64 correct operations, and 0/64 exact repairs. All 64 outputs anchored on candidate 1; all 11 parsed plans were `candidate 1; keep`. Stop structured edit-intent generation with the pinned Qwen 0.5B model. Do not prompt-tune, loosen the parser, or invent another schema on these 64 tasks.
 - **E036:** canonical continuation likelihood on the exact 64 E034 tasks did not clear its baseline-only stop floor: 0/64 exact unrotated and 10/64 with cyclic rotation versus 12.32/64 expected under uniform choice over E024-binding plans. Do not run the paired assisted E036 arm or promote the 19/64 feasible-only secondary into a post-hoc gate. This was canonical one-tokenization-per-plan scoring, not exact constrained decoding.
-- **E041:** the frozen E031 scorer transferred from four-way same-file function decisions to complete E024-bindable in-scope pools: 82/222 (36.9%) top-1 versus 27.73/222 (12.5%) expected under predicate-plus-uniform choice, +24.45 pp mean excess; clustered 95% CI +13.57 to +35.67 pp. All four repository folds were positive. Treat direct scope-pool reranking as passed; repository-pool scale remains untested and must be separately preregistered.
+- **E041:** the frozen E031 scorer transferred from four-way same-file function decisions to complete E024-bindable in-scope pools: 82/222 (36.9%) top-1 versus 27.73/222 (12.5%) expected under predicate-plus-uniform choice, +24.45 pp mean excess; clustered 95% CI +13.57 to +35.67 pp. All four repository folds were positive.
+- **E042:** repository-pool scaling also passed. After 13 deterministic rendering-ambiguity exclusions, the frozen scorer achieved 17/209 (8.13%) top-1 over complete E024-bindable repository pools versus 0.607 expected successes (0.29%) under per-task uniform choice. Mean excess was +7.84 pp; clustered 95% CI +4.46 to +11.85 pp. Pools averaged 566.75 candidates, median 483, maximum 1,122. All E031/E041 continuity guards reproduced exactly. Treat repository-wide ranking signal as demonstrated, but not practical direct selection.
 
 Do not reinterpret or retune E031 after seeing its result. Do not tune the four E027 repositories merely to improve reported historical numbers.
 
@@ -46,11 +47,11 @@ See [docs/OPEN_DIRECTIONS.md](docs/OPEN_DIRECTIONS.md).
 
 Current high-value work includes:
 
+- **main line:** repository-scale retrieval/shortlisting followed by the frozen decision reranker; report retrieval target recall separately from reranker accuracy and do not choose a cutoff post hoc from E042;
+- **encoder ablation:** CodeBERT/GraphCodeBERT is an open component-dependence experiment. Freeze task, head, training protocol, predicates, and split; change only the encoder. Treat it as exploratory unless run on a fresh preregistered population;
+- **predicate infrastructure:** add independent machine-checkable constraints from LSP/type-checker/compiler/API/test facts, with labelled-target veto regression checks and fail-open handling of unknown information;
 - if structured edit-intent generation is revisited, use a materially more capable generator under a fresh preregistration; do not continue schema/prompt tuning with Qwen 0.5B;
-- extend deterministic supervision to harder cross-file/LSP/compiler/type-checker tasks;
-- run the preregistered E042 repository-pool reranking gate with E031/E041 continuity guards;
-- test repository-scale retrieval followed by decision reranking after E042 establishes the direct-ranking boundary;
-- revisit calibrated confidence/escalation on genuinely unseen repositories;
+- revisit calibrated confidence/escalation only on a genuinely untouched population;
 - reduce cost only when the corrective-burden effect survives.
 
 ## Contribution style
@@ -73,7 +74,9 @@ Current high-value work includes:
 - raw PairwiseMLP top-softmax threshold routing already falsified as a transferable success-improving router by E039;
 - free-form repair generation without a deterministic measurement bridge;
 - further Qwen 0.5B prompt/schema tuning on the E033/E034 validity-pilot tasks;
-- paired E036 assistance or post-hoc gate changes on the frozen 64-task canonical-likelihood pilot.
+- paired E036 assistance or post-hoc gate changes on the frozen 64-task canonical-likelihood pilot;
+- training on E041/E042 pool-expanded evaluation tasks;
+- post-hoc shortlist-size selection from E042 target-rank diagnostics.
 
 ## How to work
 
