@@ -1,0 +1,533 @@
+name: e043-cross-file-retrieval
+
+on:
+  push:
+    branches: ["analysis/e043-cross-file-retrieval-live"]
+
+jobs:
+  retrieve:
+    strategy:
+      fail-fast: false
+      matrix:
+        heldout: [alphafold, pyodide, optuna, pytest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Restore model cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: e043-retrieval-${{ runner.os }}-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install retrieval dependencies
+        run: python -m pip install -e ".[coderank,potion]"
+      - name: Clone exact E031 revisions
+        run: |
+          set -e
+          clone_at () {
+            url="$1"; sha="$2"; dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/e043-repos
+          clone_at https://github.com/google-deepmind/alphafold.git c77e5d2a8961d1a353632c462914ff0a32a950f6 /tmp/e043-repos/alphafold
+          clone_at https://github.com/pyodide/pyodide.git e4d3ae954d01d61a3e90531d63b881f2d33361b4 /tmp/e043-repos/pyodide
+          clone_at https://github.com/optuna/optuna.git 7d08bfa1824606d7caedb80abfd8558bc63826d7 /tmp/e043-repos/optuna
+          clone_at https://github.com/pytest-dev/pytest.git 6a9ba0f02f827a54cff6ab4da0dddecd65444ff6 /tmp/e043-repos/pytest
+      - name: Run held-out retrieval fold
+        env:
+          HELDOUT_REPO: ${{ matrix.heldout }}
+        run: |
+          python - <<'PY'
+          import ast
+          import gc
+          import json
+          import os
+          import re
+          import statistics
+          import time
+          from pathlib import Path
+
+          import torch
+          import torch.nn.functional as F
+
+          from cdm.coderank import CodeRankEncoder
+          from cdm.crossfile import (
+              _cross_file_imports,
+              repository_hard_masked_cross_file_call_examples,
+          )
+          from cdm.focus import focus_hard_call_context
+          from cdm.potion import PotionCodeEncoder
+          from cdm.repository import collect_python_symbols
+          from cdm.scope import (
+              bindable_mask,
+              distinct_by_rendering,
+              in_scope_pools,
+              render_symbol,
+          )
+
+          REPOS = {
+              "alphafold": "/tmp/e043-repos/alphafold",
+              "pyodide": "/tmp/e043-repos/pyodide",
+              "optuna": "/tmp/e043-repos/optuna",
+              "pytest": "/tmp/e043-repos/pytest",
+          }
+          HELDOUT = os.environ["HELDOUT_REPO"]
+          ROOT = Path(REPOS[HELDOUT])
+          BODY_CHARS = 512
+          CUTOFFS = (8, 16, 32, 64)
+
+          examples = repository_hard_masked_cross_file_call_examples(
+              ROOT,
+              candidate_count=4,
+              candidate_body_chars=BODY_CHARS,
+              seed=0,
+          )
+          scope = in_scope_pools(ROOT)
+          _, by_file = collect_python_symbols(ROOT)
+          known_files = frozenset(by_file)
+
+          tasks = []
+          exclusions = []
+          for index, example in enumerate(examples):
+              focused = focus_hard_call_context(example, radius_lines=0)
+              wanted = example.candidates[example.answer_index]
+
+              repo_symbols = scope.repository_pool(example)
+              rendered_all = [
+                  render_symbol(symbol, body_chars=BODY_CHARS)
+                  for symbol in repo_symbols
+              ]
+              if wanted not in rendered_all:
+                  raise RuntimeError(
+                      f"E043 integrity failure target absent: {HELDOUT}:{example.source}"
+                  )
+
+              mask = bindable_mask(example, repo_symbols, body_chars=BODY_CHARS)
+              bindable = [
+                  symbol for symbol, allowed in zip(repo_symbols, mask)
+                  if allowed
+              ]
+              distinct, counts = distinct_by_rendering(
+                  bindable, body_chars=BODY_CHARS
+              )
+              target_count = counts.get(wanted, 0)
+              if target_count == 0:
+                  raise RuntimeError(
+                      f"E043 integrity failure target vetoed by E024: "
+                      f"{HELDOUT}:{example.source}"
+                  )
+              if target_count > 1:
+                  exclusions.append({
+                      "source_index": index,
+                      "source": example.source,
+                      "reason": "ambiguous_target_rendering",
+                      "matching_bindable_renderings": target_count,
+                  })
+                  continue
+
+              candidate_texts = tuple(
+                  render_symbol(symbol, body_chars=BODY_CHARS)
+                  for symbol in distinct
+              )
+              if wanted not in candidate_texts:
+                  raise RuntimeError("unique target missing after deduplication")
+              target_index = candidate_texts.index(wanted)
+
+              # Reconstruct the exact E030 import mapping only as a leakage guard.
+              source_path = ROOT / example.source
+              source_text = source_path.read_text(encoding="utf-8")
+              tree = ast.parse(source_text, filename=example.source)
+              imports = _cross_file_imports(
+                  tree,
+                  known_files=known_files,
+                  importing_file=Path(example.source),
+                  by_file=by_file,
+                  source_roots=("src",),
+              )
+              target_aliases = [
+                  alias for alias, symbol in imports.items()
+                  if render_symbol(symbol, body_chars=BODY_CHARS) == wanted
+              ]
+              if not target_aliases:
+                  raise RuntimeError(
+                      f"E043 could not reconstruct target import alias: "
+                      f"{HELDOUT}:{example.source}"
+                  )
+              for alias in target_aliases:
+                  if re.search(rf"\b{re.escape(alias)}\b", focused.context):
+                      raise RuntimeError(
+                          f"E043 alias leakage in query: {alias} "
+                          f"{HELDOUT}:{example.source}"
+                      )
+              target_name = wanted.splitlines()[0].split("(", 1)[0].strip()
+              if re.search(rf"\b{re.escape(target_name)}\b", focused.context):
+                  raise RuntimeError(
+                      f"E043 target-name leakage in query: {target_name} "
+                      f"{HELDOUT}:{example.source}"
+                  )
+
+              tasks.append({
+                  "source_index": index,
+                  "source": example.source,
+                  "context": focused.context,
+                  "candidate_texts": candidate_texts,
+                  "target_index": target_index,
+                  "pool_size": len(candidate_texts),
+              })
+
+          if not tasks:
+              raise RuntimeError(f"E043 no retained tasks for {HELDOUT}")
+          if len(tasks) + len(exclusions) != len(examples):
+              raise RuntimeError("E043 population accounting drift")
+
+          unique_candidates = []
+          seen_candidates = set()
+          unique_contexts = []
+          seen_contexts = set()
+          for task in tasks:
+              for text in task["candidate_texts"]:
+                  if text not in seen_candidates:
+                      seen_candidates.add(text)
+                      unique_candidates.append(text)
+              if task["context"] not in seen_contexts:
+                  seen_contexts.add(task["context"])
+                  unique_contexts.append(task["context"])
+
+          def encode_batched(encoder, texts, role, batch_size):
+              chunks = []
+              for start in range(0, len(texts), batch_size):
+                  batch = texts[start:start + batch_size]
+                  chunks.append(
+                      encoder.encode_role(batch, role=role).detach().cpu()
+                  )
+              return torch.cat(chunks, dim=0)
+
+          def run_retriever(name, encoder, candidate_batch, context_batch):
+              t0 = time.perf_counter()
+              candidate_embeddings = encode_batched(
+                  encoder, unique_candidates, "candidate", candidate_batch
+              )
+              candidate_encode_seconds = time.perf_counter() - t0
+
+              t1 = time.perf_counter()
+              context_embeddings = encode_batched(
+                  encoder, unique_contexts, "context", context_batch
+              )
+              context_encode_seconds = time.perf_counter() - t1
+
+              candidate_embeddings = F.normalize(
+                  candidate_embeddings.float(), dim=-1
+              )
+              context_embeddings = F.normalize(
+                  context_embeddings.float(), dim=-1
+              )
+              candidate_index = {
+                  text: i for i, text in enumerate(unique_candidates)
+              }
+              context_index = {
+                  text: i for i, text in enumerate(unique_contexts)
+              }
+
+              rows = []
+              ranking_seconds = 0.0
+              for task in tasks:
+                  ids = [
+                      candidate_index[text] for text in task["candidate_texts"]
+                  ]
+                  q = context_embeddings[context_index[task["context"]]]
+                  c = candidate_embeddings[ids]
+                  t2 = time.perf_counter()
+                  scores = torch.mv(c, q).tolist()
+                  ranked = sorted(
+                      range(len(scores)),
+                      key=lambda i: (-scores[i], i),
+                  )
+                  ranking_seconds += time.perf_counter() - t2
+                  rank = ranked.index(task["target_index"]) + 1
+                  row = {
+                      "source_index": task["source_index"],
+                      "source": task["source"],
+                      "pool_size": task["pool_size"],
+                      "target_rank": rank,
+                  }
+                  for k in CUTOFFS:
+                      row[f"hit_at_{k}"] = rank <= min(k, task["pool_size"])
+                      row[f"uniform_at_{k}"] = (
+                          min(k, task["pool_size"]) / task["pool_size"]
+                      )
+                  rows.append(row)
+
+              return rows, {
+                  "retriever": name,
+                  "unique_candidates": len(unique_candidates),
+                  "unique_contexts": len(unique_contexts),
+                  "candidate_encode_seconds": candidate_encode_seconds,
+                  "context_encode_seconds": context_encode_seconds,
+                  "ranking_seconds": ranking_seconds,
+              }
+
+          potion = PotionCodeEncoder()
+          potion_rows, potion_runtime = run_retriever(
+              "potion", potion, candidate_batch=256, context_batch=256
+          )
+          del potion
+          gc.collect()
+
+          coderank = CodeRankEncoder(
+              max_length=512, normalize_embeddings=False
+          )
+          coderank_rows, coderank_runtime = run_retriever(
+              "coderank", coderank, candidate_batch=32, context_batch=32
+          )
+          del coderank
+          gc.collect()
+
+          records = []
+          for task, p, c in zip(tasks, potion_rows, coderank_rows):
+              if (
+                  p["source_index"] != task["source_index"]
+                  or c["source_index"] != task["source_index"]
+              ):
+                  raise RuntimeError("E043 row identity drift")
+              record = {
+                  "repo": HELDOUT,
+                  "source_index": task["source_index"],
+                  "source": task["source"],
+                  "pool_size": task["pool_size"],
+                  "potion_rank": p["target_rank"],
+                  "coderank_rank": c["target_rank"],
+              }
+              for k in CUTOFFS:
+                  record[f"uniform_at_{k}"] = p[f"uniform_at_{k}"]
+                  record[f"potion_hit_at_{k}"] = p[f"hit_at_{k}"]
+                  record[f"coderank_hit_at_{k}"] = c[f"hit_at_{k}"]
+              records.append(record)
+
+          def retriever_summary(prefix):
+              result = {}
+              for k in CUTOFFS:
+                  hits = sum(r[f"{prefix}_hit_at_{k}"] for r in records)
+                  expected = sum(r[f"uniform_at_{k}"] for r in records)
+                  result[f"recall_at_{k}"] = hits / len(records)
+                  result[f"hits_at_{k}"] = hits
+                  result[f"uniform_expected_hits_at_{k}"] = expected
+                  result[f"mean_excess_at_{k}"] = (
+                      sum(
+                          float(r[f"{prefix}_hit_at_{k}"])
+                          - r[f"uniform_at_{k}"]
+                          for r in records
+                      ) / len(records)
+                  )
+              result["mrr"] = statistics.mean(
+                  1.0 / r[f"{prefix}_rank"] for r in records
+              )
+              return result
+
+          sizes = [r["pool_size"] for r in records]
+          summary = {
+              "heldout_repo": HELDOUT,
+              "extracted_tasks": len(examples),
+              "retained_tasks": len(records),
+              "ambiguity_exclusions": exclusions,
+              "pool": {
+                  "min": min(sizes),
+                  "max": max(sizes),
+                  "mean": statistics.mean(sizes),
+                  "median": statistics.median(sizes),
+              },
+              "potion": retriever_summary("potion"),
+              "coderank": retriever_summary("coderank"),
+              "runtime": {
+                  "potion": potion_runtime,
+                  "coderank": coderank_runtime,
+              },
+          }
+
+          path = f"/tmp/e043-{HELDOUT}.json"
+          with open(path, "w", encoding="utf-8") as handle:
+              json.dump(
+                  {"summary": summary, "records": records},
+                  handle, indent=2, sort_keys=True
+              )
+          print("E043_FOLD=" + json.dumps(summary, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e043-${{ matrix.heldout }}
+          path: /tmp/e043-${{ matrix.heldout }}.json
+
+  aggregate:
+    needs: retrieve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e043-*
+          path: /tmp/e043
+          merge-multiple: true
+      - name: Aggregate retrieval folds
+        run: |
+          python - <<'PY'
+          import glob
+          import json
+          import math
+          import random
+          import statistics
+          from collections import Counter, defaultdict
+
+          CUTOFFS = (8, 16, 32, 64)
+          BOOTSTRAPS = 5000
+          SEED = 43043
+          PRIMARY_K = 32
+
+          folds = []
+          records = []
+          exclusions = []
+          for path in sorted(glob.glob("/tmp/e043/e043-*.json")):
+              with open(path, encoding="utf-8") as handle:
+                  payload = json.load(handle)
+              folds.append(payload["summary"])
+              records.extend(payload["records"])
+              exclusions.extend(
+                  {"repo": payload["summary"]["heldout_repo"], **row}
+                  for row in payload["summary"]["ambiguity_exclusions"]
+              )
+
+          if len(folds) != 4:
+              raise RuntimeError(f"expected four E043 folds, got {len(folds)}")
+          if not records:
+              raise RuntimeError("E043 aggregate has no retained records")
+
+          groups = defaultdict(lambda: defaultdict(list))
+          for row in records:
+              groups[row["repo"]][row["source"]].append(row)
+
+          def percentile(values, q):
+              xs = sorted(values)
+              pos = (len(xs) - 1) * q
+              lo = int(math.floor(pos))
+              hi = int(math.ceil(pos))
+              if lo == hi:
+                  return xs[lo]
+              w = pos - lo
+              return xs[lo] * (1 - w) + xs[hi] * w
+
+          def retriever_report(prefix):
+              by_cutoff = {}
+              for k in CUTOFFS:
+                  hits = sum(r[f"{prefix}_hit_at_{k}"] for r in records)
+                  expected = sum(r[f"uniform_at_{k}"] for r in records)
+                  by_cutoff[str(k)] = {
+                      "hits": hits,
+                      "recall": hits / len(records),
+                      "uniform_expected_hits": expected,
+                      "uniform_expected_recall": expected / len(records),
+                      "mean_excess": (
+                          sum(
+                              float(r[f"{prefix}_hit_at_{k}"])
+                              - r[f"uniform_at_{k}"]
+                              for r in records
+                          ) / len(records)
+                      ),
+                  }
+
+              rng = random.Random(SEED)
+              boots = []
+              for _ in range(BOOTSTRAPS):
+                  sample = []
+                  for repo in sorted(groups):
+                      sources = sorted(groups[repo])
+                      for _ in range(len(sources)):
+                          source = rng.choice(sources)
+                          sample.extend(groups[repo][source])
+                  boots.append(statistics.mean(
+                      float(r[f"{prefix}_hit_at_{PRIMARY_K}"])
+                      - r[f"uniform_at_{PRIMARY_K}"]
+                      for r in sample
+                  ))
+              ci = [percentile(boots, .025), percentile(boots, .975)]
+
+              per_repo = {}
+              for repo in sorted(groups):
+                  rows = [r for r in records if r["repo"] == repo]
+                  hits = sum(r[f"{prefix}_hit_at_{PRIMARY_K}"] for r in rows)
+                  expected = sum(r[f"uniform_at_{PRIMARY_K}"] for r in rows)
+                  per_repo[repo] = {
+                      "n": len(rows),
+                      "hits_at_32": hits,
+                      "recall_at_32": hits / len(rows),
+                      "uniform_expected_hits_at_32": expected,
+                  }
+
+              report = {
+                  "cutoffs": by_cutoff,
+                  "cluster_bootstrap_95ci_excess_at_32": ci,
+                  "mrr": statistics.mean(
+                      1.0 / r[f"{prefix}_rank"] for r in records
+                  ),
+                  "target_rank_histogram": dict(sorted(Counter(
+                      r[f"{prefix}_rank"] for r in records
+                  ).items())),
+                  "per_repo": per_repo,
+              }
+              recall32 = by_cutoff[str(PRIMARY_K)]["recall"]
+              report["viability_gate"] = {
+                  "recall_at_32_ge_0_75": recall32 >= 0.75,
+                  "cluster_lower_excess_gt_zero": ci[0] > 0.0,
+              }
+              report["viability_gate"]["passed"] = all(
+                  report["viability_gate"].values()
+              )
+              return report
+
+          potion = retriever_report("potion")
+          coderank = retriever_report("coderank")
+
+          if potion["viability_gate"]["passed"]:
+              continuation = "potion"
+          elif coderank["viability_gate"]["passed"]:
+              continuation = "coderank"
+          else:
+              continuation = "stop_context_cosine_retrieval"
+
+          sizes = [r["pool_size"] for r in records]
+          report = {
+              "protocol": "E043 cross-file repository retrieval",
+              "primary_shortlist": PRIMARY_K,
+              "retained_tasks": len(records),
+              "ambiguity_exclusions": exclusions,
+              "pool": {
+                  "min": min(sizes),
+                  "max": max(sizes),
+                  "mean": statistics.mean(sizes),
+                  "median": statistics.median(sizes),
+              },
+              "potion": potion,
+              "coderank": coderank,
+              "continuation": continuation,
+              "bootstrap_replicates": BOOTSTRAPS,
+              "bootstrap_seed": SEED,
+              "folds": sorted(folds, key=lambda f: f["heldout_repo"]),
+          }
+
+          with open("/tmp/e043-aggregate.json", "w", encoding="utf-8") as handle:
+              json.dump(
+                  {"summary": report, "records": records},
+                  handle, indent=2, sort_keys=True
+              )
+          print("E043_AGGREGATE=" + json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e043-aggregate
+          path: /tmp/e043-aggregate.json
