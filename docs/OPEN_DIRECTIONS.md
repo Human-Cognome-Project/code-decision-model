@@ -205,13 +205,17 @@ Do not hide retrieval misses inside decision accuracy.
 E040 measured the deterministic retrieval stage without a model: in-scope and
 repository pools per task, E024 pruning, and pool-complete re-posed tasks.
 
-E041 now preregisters the first live pool-scale gate on the exact E031 same-file
-function task: frozen leave-one-repository-out scorer, complete E024-bindable
-scope pool, and a per-task uniform-over-bindable baseline. It is scorer-only so
-candidate-pool scaling is not confounded with a new generator surface or the
-cross-file task family. A failed clustered excess-over-uniform gate stops direct
-full-scope reranking and moves the project to retrieval/shortlisting. A pass
-permits a separately preregistered repository-pool gate.
+E041 completed the first live pool-scale gate on the exact E031 same-file
+function task. Over all 222 complete E024-bindable in-scope pools, the frozen
+scorer achieved 82/222 top-1 versus 27.73 expected under predicate-plus-uniform
+choice. Mean excess was +24.45 pp with clustered 95% CI +13.57 to +35.67 pp,
+and all four repository folds were positive. Pool size averaged 11.43 candidates
+with median 8 and maximum 42.
+
+This passes direct full-scope reranking. The next gate is repository scale,
+which E040 showed can be one to two orders of magnitude larger. It must be
+preregistered separately; do not infer repository-scale success from E041 and do
+not tune the scorer on these pool-expanded E031 tasks.
 
 ## Confidence and escalation
 
