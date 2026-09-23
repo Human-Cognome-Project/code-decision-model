@@ -59,6 +59,7 @@ from .plan_scoring import (
     run_paired_plan_scoring,
     run_plan_scoring_loop,
     top_candidate_histogram,
+    top_candidate_ties,
 )
 from .scope import (
     InScopePool,
@@ -152,6 +153,7 @@ __all__ = [
     "run_paired_plan_scoring",
     "run_plan_scoring_loop",
     "top_candidate_histogram",
+    "top_candidate_ties",
     "plan_space",
     "plan_vocabulary",
     "predicate_census",

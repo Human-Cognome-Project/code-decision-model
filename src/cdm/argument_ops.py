@@ -24,12 +24,14 @@ cannot launder an invented keyword through the binding predicate.
 To give the operations something to do, the masked call site is perturbed
 deterministically and the original call is the machine-labelled truth. The
 default (semantic) perturbations are constructed without consulting the answer
-label: the corrupted call is a function of the caller and the *set* of
-candidates only, and :func:`corruption_is_label_invariant` checks that
-property mechanically by relabelling the example. The E024 predicate checks the
-result against the chosen candidate's real signature before any comparison,
-and because the plan space is small it also provides a model-free baseline:
-enumerate every plan the parser accepts and keep the ones that bind.
+label: the corrupted call is a function of the caller, the ordered candidate
+tuple, the source path and the seed, never ``answer_index``, and
+:func:`corruption_is_label_invariant` checks that property mechanically by
+relabelling the example. Reordering the candidates can change the corruption.
+The E024 predicate checks the result against the chosen candidate's real
+signature before any comparison, and because the plan space is small it also
+provides a model-free baseline: enumerate every plan the parser accepts and
+keep the ones that bind.
 """
 from __future__ import annotations
 

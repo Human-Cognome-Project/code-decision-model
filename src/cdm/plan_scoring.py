@@ -39,6 +39,7 @@ Two controls are built in and label-free:
 from __future__ import annotations
 
 import copy
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
@@ -294,16 +295,43 @@ def chance_baselines(item: ArgumentRepairExample, *, recommendation_index: int |
 
 
 def top_candidate_histogram(rankings: Sequence[Sequence[ScoredPlan]], count: int) -> tuple[int, ...]:
-    """How often each candidate position holds the top-ranked plan.
+    """How often each original candidate index holds the top-ranked plan.
 
-    Under E034's free generation this was ``(64, 0, 0, 0)``. Compared with the
-    same histogram under cyclic shifts, it measures the position prior.
+    ``rank_plans`` maps rotated scores back to original indices, so this counts
+    original candidates. It equals the shown position only for unrotated
+    rankings (``shifts=1``); E034's free generation gave ``(64, 0, 0, 0)``
+    there. Ties break toward the lowest index, and under full rotation a
+    position prior that cancels leaves every candidate tied, and the winner is
+    then the tie-break's candidate 1 or, when the rotation average rounds
+    unevenly, an arbitrary candidate. Read it together with
+    :func:`top_candidate_ties`.
     """
     histogram = [0] * count
     for ranked in rankings:
         if ranked:
             histogram[ranked[0].plan.candidate_index] += 1
     return tuple(histogram)
+
+
+def top_candidate_ties(rankings: Sequence[Sequence[ScoredPlan]], *, rel_tol: float = 1e-9) -> int:
+    """Rankings whose top score is shared by plans of two or more candidates.
+
+    In these rankings the histogram's winner was chosen by the tie-break or by
+    floating-point rounding in the rotation average, not by the scorer. Scores
+    within ``rel_tol`` of the best count as tied.
+    """
+    tied = 0
+    for ranked in rankings:
+        if not ranked:
+            continue
+        best = ranked[0].score
+        winners = {
+            scored.plan.candidate_index for scored in ranked
+            if math.isclose(scored.score, best, rel_tol=rel_tol, abs_tol=1e-12)
+        }
+        if len(winners) > 1:
+            tied += 1
+    return tied
 
 
 # ---------------------------------------------------------------------------

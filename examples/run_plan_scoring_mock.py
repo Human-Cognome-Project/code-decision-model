@@ -36,6 +36,7 @@ from cdm.plan_scoring import (
     rank_plans,
     run_plan_scoring_loop,
     top_candidate_histogram,
+    top_candidate_ties,
 )
 from cdm.repair import candidate_symbol
 from cdm.repository import repository_hard_masked_call_examples
@@ -84,9 +85,10 @@ def report(label, items, make_scorer, *, shifts=1, max_attempts=3):
     n = len(items)
     count = len(items[0].example.candidates)
     hist = top_candidate_histogram(rankings, count)
+    ties = top_candidate_ties(rankings)
     mean_turns = sum(turns) / len(turns) if turns else float("nan")
     print(f"{label:<28} first-pass {first:>3}/{n}   within {max_attempts} attempts {exact:>3}/{n}   "
-          f"mean correction turns {mean_turns:.2f}   top-ranked candidate position {hist}")
+          f"mean correction turns {mean_turns:.2f}   top-ranked original candidate {hist}, tied {ties}/{n}")
 
 
 def main(argv: list[str]) -> int:
