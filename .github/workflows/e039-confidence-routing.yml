@@ -1,0 +1,299 @@
+name: e039-confidence-routing
+
+on:
+  push:
+    branches: ["analysis/e039-confidence-routing-live"]
+
+jobs:
+  score:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {population: e027, heldout: browser-use}
+          - {population: e027, heldout: crawl4ai}
+          - {population: e027, heldout: markitdown}
+          - {population: e027, heldout: scrapling}
+          - {population: e031, heldout: alphafold}
+          - {population: e031, heldout: pyodide}
+          - {population: e031, heldout: optuna}
+          - {population: e031, heldout: pytest}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Restore model cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: e039-coderank-${{ runner.os }}-py312-v1
+      - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install scorer dependencies
+        run: python -m pip install -e ".[coderank]"
+      - name: Clone exact repositories
+        env:
+          POPULATION: ${{ matrix.population }}
+        run: |
+          set -e
+          clone_at () {
+            url="$1"; sha="$2"; dest="$3"
+            git clone --filter=blob:none --no-checkout "$url" "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+          }
+          mkdir -p /tmp/e039-repos
+          if [ "$POPULATION" = "e027" ]; then
+            clone_at https://github.com/browser-use/browser-use.git d8110c5ff87ccba887aaa726cdb780f2f84bef8d /tmp/e039-repos/browser-use
+            clone_at https://github.com/unclecode/crawl4ai.git 862f6bccb9c063f49b9d42701baa0eea17a4993f /tmp/e039-repos/crawl4ai
+            clone_at https://github.com/microsoft/markitdown.git b8f79c57ebc0044be41323d89b2a45d3fda8460e /tmp/e039-repos/markitdown
+            clone_at https://github.com/D4Vinci/Scrapling.git 08f107b1240fd72847b0f5e10426c7e6cc16e67e /tmp/e039-repos/scrapling
+          else
+            clone_at https://github.com/google-deepmind/alphafold.git c77e5d2a8961d1a353632c462914ff0a32a950f6 /tmp/e039-repos/alphafold
+            clone_at https://github.com/pyodide/pyodide.git e4d3ae954d01d61a3e90531d63b881f2d33361b4 /tmp/e039-repos/pyodide
+            clone_at https://github.com/optuna/optuna.git 7d08bfa1824606d7caedb80abfd8558bc63826d7 /tmp/e039-repos/optuna
+            clone_at https://github.com/pytest-dev/pytest.git 6a9ba0f02f827a54cff6ab4da0dddecd65444ff6 /tmp/e039-repos/pytest
+          fi
+      - name: Reproduce scorer and collect confidence
+        env:
+          POPULATION: ${{ matrix.population }}
+          HELDOUT_REPO: ${{ matrix.heldout }}
+        run: |
+          python - <<'PY'
+          import json, os, torch
+          from cdm import CodeDecisionModel, CodeRankEncoder, PairwiseMLPScorer
+          from cdm.focus import focus_hard_call_context
+          from cdm.methods import repository_hard_masked_method_call_examples
+          from cdm.repository import namespace_repository_examples, repository_hard_masked_call_examples
+          from cdm.training import collate_encoded_examples, preencode_examples
+
+          POP = os.environ["POPULATION"]
+          HELDOUT = os.environ["HELDOUT_REPO"]
+          if POP == "e027":
+              names = ["browser-use", "crawl4ai", "markitdown", "scrapling"]
+              expected_top1 = {"browser-use":133, "crawl4ai":83, "markitdown":11, "scrapling":9}
+              expected_n = {"browser-use":210, "crawl4ai":160, "markitdown":17, "scrapling":13}
+          else:
+              names = ["alphafold", "pyodide", "optuna", "pytest"]
+              expected_top1 = {"alphafold":11, "pyodide":36, "optuna":87, "pytest":110}
+              expected_n = {"alphafold":26, "pyodide":53, "optuna":134, "pytest":208}
+
+          def repo_of(e): return e.source.split("::",1)[0]
+          def task_kind(e): return "method" if "same_class" in e.task else "function"
+
+          pooled=[]
+          for name in names:
+              root=f"/tmp/e039-repos/{name}"
+              funcs=repository_hard_masked_call_examples(root,candidate_count=4,candidate_body_chars=512,seed=0)
+              methods=repository_hard_masked_method_call_examples(root,candidate_count=4,candidate_body_chars=512,seed=0)
+              pooled.extend(namespace_repository_examples(funcs,name))
+              pooled.extend(namespace_repository_examples(methods,name))
+
+          train=[e for e in pooled if repo_of(e)!=HELDOUT]
+          test=[e for e in pooled if repo_of(e)==HELDOUT]
+          if len(test)!=expected_n[HELDOUT]:
+              raise RuntimeError(f"E039 task drift {POP}/{HELDOUT}: {len(test)} != {expected_n[HELDOUT]}")
+
+          train_focus=[focus_hard_call_context(e,radius_lines=0) for e in train]
+          test_focus=[focus_hard_call_context(e,radius_lines=0) for e in test]
+          encoder=CodeRankEncoder(max_length=512,normalize_embeddings=False)
+          shell=CodeDecisionModel(encoder=encoder,dim=encoder.dim,scorer=PairwiseMLPScorer(encoder.dim,hidden=32))
+          encoded=preencode_examples(shell,[*train_focus,*test_focus],batch_size=8)
+          n_train=len(train_focus)
+          encoded_train=encoded[:n_train]
+          encoded_test=encoded[n_train:]
+
+          torch.manual_seed(2)
+          shell.scorer=PairwiseMLPScorer(encoder.dim,hidden=32)
+          opt=torch.optim.AdamW(shell.scorer.parameters(),lr=1e-3,weight_decay=1e-2)
+          order=torch.randperm(len(encoded_train),generator=torch.Generator().manual_seed(20001)).tolist()
+          shell.scorer.train()
+          for start in range(0,len(order),32):
+              ids=order[start:start+32]
+              batch=collate_encoded_examples([encoded_train[i] for i in ids])
+              opt.zero_grad(set_to_none=True)
+              logits=shell.score_encoded_batch(batch.contexts,batch.questions,batch.candidate_embeddings)
+              loss=torch.nn.functional.cross_entropy(logits,batch.targets)
+              loss.backward()
+              torch.nn.utils.clip_grad_norm_(shell.scorer.parameters(),1.0)
+              opt.step()
+
+          shell.scorer.eval()
+          rows=[]
+          correct=0
+          with torch.no_grad():
+              for e,item in zip(test,encoded_test):
+                  logits=shell.score_encoded(item.decision_context,item.candidate_embeddings)
+                  probs=torch.softmax(logits.float(),dim=0)
+                  rec=int(logits.argmax())
+                  correct += rec==e.answer_index
+                  rows.append({
+                      "population":POP,"repo":HELDOUT,"task":task_kind(e),"source":e.source,
+                      "answer_index":e.answer_index,"recommendation_index":rec,
+                      "confidence":float(probs[rec]),"logits":[float(x) for x in logits],
+                  })
+          if correct != expected_top1[HELDOUT]:
+              raise RuntimeError(f"E039 scorer drift {POP}/{HELDOUT}: {correct} != {expected_top1[HELDOUT]}")
+          path=f"/tmp/e039-{POP}-{HELDOUT}.json"
+          with open(path,"w",encoding="utf-8") as f: json.dump(rows,f,indent=2,sort_keys=True)
+          print(json.dumps({"population":POP,"heldout":HELDOUT,"n":len(rows),"top1_correct":correct},sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e039-score-${{ matrix.population }}-${{ matrix.heldout }}
+          path: /tmp/e039-${{ matrix.population }}-${{ matrix.heldout }}.json
+
+  aggregate:
+    needs: score
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e039-score-*
+          path: /tmp/e039/scores
+          merge-multiple: true
+      - name: Download preserved E027 aggregate
+        uses: actions/download-artifact@v4
+        with:
+          name: e027-aggregate
+          path: /tmp/e039/e027
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 35771855455
+      - name: Download preserved E031 aggregate
+        uses: actions/download-artifact@v4
+        with:
+          name: e031-aggregate
+          path: /tmp/e039/e031
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 35789900382
+      - name: Fit E027 threshold and evaluate E031
+        run: |
+          python - <<'PY'
+          import glob,json,math,random,statistics
+          from collections import defaultdict
+
+          scores=[]
+          for p in glob.glob("/tmp/e039/scores/*.json"):
+              with open(p,encoding="utf-8") as f: scores.extend(json.load(f))
+          if len(scores)!=821: raise RuntimeError(f"expected 821 score rows, got {len(scores)}")
+
+          def load_one(pattern):
+              paths=glob.glob(pattern)
+              if len(paths)!=1: raise RuntimeError(f"expected one file for {pattern}, got {paths}")
+              with open(paths[0],encoding="utf-8") as f: return json.load(f)["records"]
+          hist={"e027":load_one("/tmp/e039/e027/*.json"),"e031":load_one("/tmp/e039/e031/*.json")}
+          if len(hist["e027"])!=400 or len(hist["e031"])!=421: raise RuntimeError("historical task-count drift")
+
+          def key(r):
+              return (r["repo"],r["source"],r["task"],int(r["answer_index"]),int(r["recommendation_index"]))
+          score_by_pop=defaultdict(dict)
+          for r in scores:
+              k=key(r)
+              if k in score_by_pop[r["population"]]: raise RuntimeError(f"duplicate score key {k}")
+              score_by_pop[r["population"]][k]=r
+
+          joined={}
+          for pop in ("e027","e031"):
+              rows=[]
+              for h in hist[pop]:
+                  k=key(h)
+                  if k not in score_by_pop[pop]:
+                      raise RuntimeError(f"recommendation identity mismatch or missing score: {pop} {k}")
+                  s=score_by_pop[pop][k]
+                  rows.append({**h,"confidence":s["confidence"],"logits":s["logits"]})
+              if len(rows)!=len(score_by_pop[pop]): raise RuntimeError(f"extra score rows in {pop}")
+              joined[pop]=rows
+
+          thresholds=[round(0.25+0.05*i,2) for i in range(15)]
+          def route_row(r,t):
+              arm="assisted" if r["confidence"]>=t else "baseline"
+              return r[arm],arm
+          def curve(rows):
+              out=[]
+              for t in thresholds:
+                  chosen=[route_row(r,t)[0] for r in rows]
+                  out.append({
+                      "threshold":t,
+                      "successes":sum(x["success"] for x in chosen),
+                      "first_pass_successes":sum(x["first_pass"] for x in chosen),
+                      "mean_attempts":statistics.mean(x["attempts"] for x in chosen),
+                      "assisted_tasks":sum(r["confidence"]>=t for r in rows),
+                  })
+              return out
+          dev_curve=curve(joined["e027"])
+          best=max(dev_curve,key=lambda x:(x["successes"],x["threshold"]))
+          t=best["threshold"]
+          test=joined["e031"]
+          routed=[]
+          for r in test:
+              outcome,arm=route_row(r,t)
+              routed.append((r,outcome,arm))
+
+          route_success=sum(o["success"] for _,o,_ in routed)
+          assist_success=sum(r["assisted"]["success"] for r,_,_ in routed)
+          route_only=sum(o["success"] and not r["assisted"]["success"] for r,o,_ in routed)
+          assist_only=sum(r["assisted"]["success"] and not o["success"] for r,o,_ in routed)
+
+          def binom(k,n):
+              if n==0:return 1.0
+              low=min(k,n-k)
+              tail=sum(math.comb(n,i) for i in range(low+1))/(2**n)
+              return min(1.0,2*tail)
+
+          groups=defaultdict(lambda:defaultdict(list))
+          for r,o,arm in routed: groups[r["repo"]][r["source"]].append((r,o))
+          rng=random.Random(39039); boots=[]
+          for _ in range(5000):
+              sample=[]
+              for repo in sorted(groups):
+                  sources=sorted(groups[repo])
+                  for _ in sources:
+                      src=rng.choice(sources); sample.extend(groups[repo][src])
+              boots.append((sum(o["success"] for r,o in sample)-sum(r["assisted"]["success"] for r,o in sample))/len(sample))
+          def pct(xs,q):
+              xs=sorted(xs); pos=(len(xs)-1)*q; lo=int(math.floor(pos)); hi=int(math.ceil(pos))
+              return xs[lo] if lo==hi else xs[lo]*(hi-pos)+xs[hi]*(pos-lo)
+          ci=[pct(boots,.025),pct(boots,.975)]
+          gate={"positive_delta":route_success>assist_success,"mcnemar_p_below_0_05":binom(route_only,route_only+assist_only)<.05,"cluster_lower_above_zero":ci[0]>0}
+          gate["passed"]=all(gate.values())
+
+          routed_assist=[r for r,o,a in routed if a=="assisted"]
+          abstained=[r for r,o,a in routed if a=="baseline"]
+          report={
+              "selected_threshold":t,
+              "e027_threshold_curve":dev_curve,
+              "e027_selected":best,
+              "e031_sensitivity_curve":curve(test),
+              "e031":{
+                  "tasks":421,
+                  "always_assist_successes":assist_success,
+                  "routed_successes":route_success,
+                  "success_delta":(route_success-assist_success)/421,
+                  "route_only":route_only,"assist_only":assist_only,
+                  "mcnemar_exact_two_sided_p":binom(route_only,route_only+assist_only),
+                  "cluster_bootstrap_95ci":ci,
+                  "assisted_tasks":len(routed_assist),
+                  "abstained_tasks":len(abstained),
+                  "assisted_fraction":len(routed_assist)/421,
+                  "recommendation_accuracy_assisted":sum(r["recommendation_correct"] for r in routed_assist)/len(routed_assist) if routed_assist else None,
+                  "recommendation_accuracy_abstained":sum(r["recommendation_correct"] for r in abstained)/len(abstained) if abstained else None,
+                  "routed_first_pass_successes":sum(o["first_pass"] for r,o,a in routed),
+                  "routed_mean_attempts":statistics.mean(o["attempts"] for r,o,a in routed),
+              },
+              "gate":gate,
+          }
+          with open("/tmp/e039-result.json","w",encoding="utf-8") as f: json.dump({"summary":report,"scores":scores},f,indent=2,sort_keys=True)
+          print("E039_RESULT="+json.dumps(report,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e039-result
+          path: /tmp/e039-result.json
