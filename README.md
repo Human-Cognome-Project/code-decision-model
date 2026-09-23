@@ -73,15 +73,16 @@ These results support the frozen structured-selection task. They are not claims 
 
 Independent replication is complete. Current work asks what parts of the mechanism generalize beyond the original index-selection surface.
 
-Two post-replication mechanism results now sharpen that question:
+Three post-replication mechanism results now sharpen that question:
 
 - **E032 ranked re-recommendation:** on the original development repositories, replacing rejected evidence with the scorer's next feasible ranked recommendation improved success from 292/400 (73.0%) under E029 to 315/400 (78.75%). On wrong-first-recommendation tasks, recovery improved from 56/164 (34.1%) to 79/164 (48.2%), with exact McNemar p = 0.0128. This remains exploratory until the exact final intervention is replicated on the E031 independent repositories.
 - **E033 call-expression intent:** a baseline-only 64-task validity pilot reached only 23/64 uniquely resolved/bindable calls and 2/64 exact repairs. The free-form call-expression surface is stopped for the pinned 0.5B generator.
+- **E034 closed-vocabulary argument operations:** narrowing the output to one candidate plus one closed-vocabulary operation did not rescue Qwen 0.5B. Only 11/64 plans parsed, 2/64 were bindable, and 0/64 exactly repaired the call. All parsed plans were `candidate 1; keep`. Structured edit-intent generation is therefore stopped for this generator.
 
 Active directions include:
 
 - independent replication of the exact final E032 correction intervention on the E031 repository set;
-- a narrower machine-checkable AST-operation schema as the successor to E033;
+- a materially more capable generator, under fresh preregistration, if structured edit-intent generation is revisited;
 - replication with a second compact open generator;
 - harder cross-file/LSP/compiler/type-checker decision tasks;
 - repository-scale retrieval followed by decision reranking;
