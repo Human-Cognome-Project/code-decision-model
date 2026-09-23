@@ -435,12 +435,20 @@ python examples/census_in_scope_pools.py
 
 ## E041 — Scope-pool reranking
 
-See [E041_SCOPE_POOL_RERANKING_PREREG.md](E041_SCOPE_POOL_RERANKING_PREREG.md).
+See [E041_SCOPE_POOL_RERANKING_PREREG.md](E041_SCOPE_POOL_RERANKING_PREREG.md)
+and [E041_SCOPE_POOL_RERANKING_RESULT.md](E041_SCOPE_POOL_RERANKING_RESULT.md).
 
-Preregisters a scorer-only scale gate on the frozen E031 same-file function
-population. The exact E031 leave-one-repository-out scorer is trained unchanged,
-then each held-out four-candidate task is re-posed over its complete E040
-E024-bindable in-scope pool. Primary performance is neural top-1 accuracy minus
-the per-task predicate-plus-uniform expectation `1 / pool_size`, with a
-repository-stratified source-file bootstrap. No generator or cross-file task is
-introduced at this gate.
+The scorer-only scope-pool gate passed on all 222 frozen E031 same-file function
+tasks with no ambiguity exclusions. The frozen scorer achieved 82/222 (36.9%)
+top-1 over complete E024-bindable in-scope pools versus 27.73/222 (12.5%)
+expected under per-task predicate-plus-uniform choice, for a +24.45 pp mean
+excess. The repository-stratified source-file bootstrap 95% CI was +13.57 to
++35.67 pp.
+
+The widened pools averaged 11.43 candidates (median 8, range 4–42). Original
+four-candidate function top-1 was 140/222 (63.1%), so absolute accuracy dropped
+with pool size but remained far above the correct pool-scale baseline. All four
+repository folds had positive excess.
+
+E041 therefore supports direct frozen-scorer ranking at complete in-scope scale.
+Repository-level pools remain a separate, larger gate.
