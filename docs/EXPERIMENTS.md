@@ -338,9 +338,11 @@ See [E036_CONSTRAINED_PLAN_SCORING.md](E036_CONSTRAINED_PLAN_SCORING.md).
 
 E034 showed the pinned generator cannot *emit* a closed-vocabulary plan. E036
 asks whether it *knows* one: every plan in the E034 plan space is scored by the
-generator's log-probability (plan text plus end-of-turn token, given the
-unchanged E034 prompt) and the best-scoring plan is taken, which is exact
-constrained decoding. Format validity is 100% by construction; the question
+generator's log-probability of its canonical token sequence (the plan text
+tokenised on its own plus the end-of-turn token, after the frozen E034 prompt
+tokens) and the best-scoring plan is taken. This is canonical continuation
+likelihood ranking, not exact grammar-constrained decoding, which would sum
+over every tokenisation of a plan. Format validity is 100% by construction; the question
 becomes whether the likelihood ranks the restoring plan above chance and above
 the model-free predicate-plus-ranker baseline. Corrective turns are
 deterministic (drop the rejected plan, take the next). Label-free controls:

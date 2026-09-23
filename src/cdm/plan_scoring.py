@@ -8,11 +8,15 @@ not say whether the generator *knows* the answer.
 
 E036 separates the two. The E034 plan space is finite and enumerable
 (:func:`cdm.argument_ops.plan_space`), so instead of sampling text the
-generator scores every plan: the log-probability of the rendered plan, followed
-by the end-of-turn token, given the E034 prompt. The highest-scoring plan is the
-exact maximum a posteriori output under a grammar constraint, which is what a
-constrained decoder would return. Format validity is 100% by construction, so
-what remains is purely the ranking question:
+generator scores every plan: the log-probability of the plan's *canonical*
+token sequence (the rendered plan tokenised on its own, followed by the
+end-of-turn token) given the frozen E034 prompt tokens. The highest-scoring
+plan is the output. This is canonical continuation likelihood ranking under a
+frozen prompt token boundary. It is *not* exact grammar-constrained decoding: a
+token-level constrained decoder may admit several token sequences that decode
+to the same plan, and the plan's total probability is the sum over all of
+them, which this scorer does not compute. Format validity is 100% by
+construction, so what remains is purely the ranking question:
 
 - does the generator's likelihood put the restoring plan above chance over the
   plan space, and above the deterministic predicate-plus-ranker baseline?

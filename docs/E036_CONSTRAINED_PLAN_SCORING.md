@@ -24,15 +24,31 @@ generator does not have to produce text at all. For every plan it computes
 log P(render(plan) + <end-of-turn> | E034 prompt)
 ```
 
-and the highest-scoring plan is the output. That is the exact maximum a
-posteriori plan under a grammar constraint, the thing a constrained decoder
-approximates by search. Format validity is 100% by construction, so the E034
-funnel collapses to two questions:
+where `render(plan)` is tokenised on its own after the frozen prompt token
+sequence, and the highest-scoring plan is the output. Call this **canonical
+continuation likelihood ranking under a frozen prompt token boundary**. Format
+validity is 100% by construction, so the E034 funnel collapses to two
+questions:
 
 1. Does the likelihood rank the restoring plan above chance over the plan
    space, and above the model-free predicate-plus-ranker baseline?
 2. How much of the ranking is the candidate-1 position prior that E034
    exposed, as opposed to a preference for the right candidate and operation?
+
+**What this measurement is not.** It is not exact grammar-constrained
+decoding, and its top plan is not proven to be the maximum a posteriori plan
+under a grammar constraint. A token-level constrained decoder may admit more
+than one token sequence that decodes to the same plan; the plan's probability
+under such a decoder is the sum over all admissible tokenisations, and its
+argmax can differ from the argmax over one canonical tokenisation per plan.
+E036 scores exactly one sequence per plan: the continuation string tokenised in
+isolation, checked to decode back to the plan, followed by the end-of-turn id.
+The round-trip check proves that sequence is valid, not that it is unique or
+that it carries the plan's whole mass. A positive result therefore means that
+canonical plan likelihood carries signal about the target and the operation;
+it does not by itself prove that grammar-constrained decoding would fix E034's
+emission failure. Exhaustive scoring over all admissible tokenisations is a
+possible follow-up if the canonical result warrants it.
 
 The corrective turn is deterministic, as in E032: a verifier-rejected plan is
 removed and the next-ranked plan is tried. No re-prompting is involved, so a
@@ -126,7 +142,8 @@ is `python examples/run_plan_scoring_mock.py --hf`.
 1. **Open question**: does the frozen 0.5B generator's likelihood over the
    closed E034 plan space rank the restoring plan above the model-free
    predicate-plus-ranker baseline, and does the fallible recommendation reduce
-   corrective turns when the output surface is exhaustive constrained decoding?
+   corrective turns when the output surface is canonical continuation
+   likelihood ranking over the closed plan space?
 2. **Deterministic signal**: the unchanged E034 verifier and truth; the analytic
    chance baselines; the rotation histogram.
 3. **Comparison**: uniform over the plan space; uniform over binding plans;
@@ -138,9 +155,12 @@ is `python examples/run_plan_scoring_mock.py --hf`.
    tasks than the uniform-over-binding-plans expectation, and rotation does not
    change that, the generator does not know the plan either: the E034 boundary
    is capability, not emission, and the next step is a larger generator, as
-   E034 already recorded. If it is exact on materially more, emission was the
-   boundary, constrained decoding is the fix, and the paired assisted run is
-   worth its cost.
+   E034 already recorded. If it is exact on materially more, canonical plan
+   likelihood carries signal the free generation could not express, and the
+   paired assisted run is worth its cost. That reading stops short of claiming
+   a grammar-constrained decoder would recover the same plans; establishing
+   that needs the exhaustive-tokenisation scoring described above, under its
+   own preregistration.
 
 ## Predictions
 
