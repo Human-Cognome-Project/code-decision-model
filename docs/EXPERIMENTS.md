@@ -309,3 +309,24 @@ therefore stops this structured edit-intent surface for Qwen 0.5B. Do not run a
 paired assisted E034 experiment or tune the schema/prompt on these pilot tasks.
 A future edit-intent experiment should change generator capability under a
 fresh preregistration.
+
+## E035 — Constrained plan scoring
+
+See [E035_CONSTRAINED_PLAN_SCORING.md](E035_CONSTRAINED_PLAN_SCORING.md).
+
+E034 showed the pinned generator cannot *emit* a closed-vocabulary plan. E035
+asks whether it *knows* one: every plan in the E034 plan space is scored by the
+generator's log-probability (plan text plus end-of-turn token, given the
+unchanged E034 prompt) and the best-scoring plan is taken, which is exact
+constrained decoding. Format validity is 100% by construction; the question
+becomes whether the likelihood ranks the restoring plan above chance and above
+the model-free predicate-plus-ranker baseline. Corrective turns are
+deterministic (drop the rejected plan, take the next). Label-free controls:
+length normalisation and cyclic candidate rotation, which cancels the
+candidate-1 position prior E034 exposed.
+
+Mock (no download):
+
+```bash
+python examples/run_plan_scoring_mock.py
+```
