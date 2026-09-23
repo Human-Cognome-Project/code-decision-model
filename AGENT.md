@@ -47,7 +47,7 @@ See [docs/OPEN_DIRECTIONS.md](docs/OPEN_DIRECTIONS.md).
 
 Current high-value work includes:
 
-- **main line:** repository-scale retrieval/shortlisting followed by the frozen decision reranker; report retrieval target recall separately from reranker accuracy and do not choose a cutoff post hoc from E042;
+- **main line / E043:** run the preregistered cross-file repository retrieval gate before any new reranker or generator experiment. E030 masked caller context only; Potion 16M primary, frozen CodeRank cosine reference, fixed primary shortlist 32, recall reported separately from reranking;
 - **encoder ablation:** CodeBERT/GraphCodeBERT is an open component-dependence experiment. Freeze task, head, training protocol, predicates, and split; change only the encoder. Treat it as exploratory unless run on a fresh preregistered population;
 - **predicate infrastructure:** add independent machine-checkable constraints from LSP/type-checker/compiler/API/test facts, with labelled-target veto regression checks and fail-open handling of unknown information;
 - if structured edit-intent generation is revisited, use a materially more capable generator under a fresh preregistration; do not continue schema/prompt tuning with Qwen 0.5B;

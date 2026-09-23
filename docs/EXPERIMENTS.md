@@ -480,3 +480,14 @@ All E031 and E041 continuity guards reproduced exactly. The result establishes
 repository-wide ranking signal, not a practical direct-selection interface; the
 next main-line question is retrieval/shortlisting with target recall measured
 separately from reranking.
+
+## E043 — Cross-file repository retrieval
+
+See [E043_CROSS_FILE_RETRIEVAL_PREREG.md](E043_CROSS_FILE_RETRIEVAL_PREREG.md).
+
+Preregisters a retrieval-only test on E030 cross-file callers whose returned
+context omits the import statement. Complete E024-bindable repository pools are
+ranked by context-to-candidate cosine using a cheap Potion 16M primary retriever
+and frozen CodeRank reference. The primary shortlist is fixed at 32 candidates;
+retrieval target recall is measured separately from any later decision reranking.
+No PairwiseMLP or generator is used in E043.
