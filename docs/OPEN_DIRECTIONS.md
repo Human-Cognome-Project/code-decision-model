@@ -212,11 +212,20 @@ choice. Mean excess was +24.45 pp with clustered 95% CI +13.57 to +35.67 pp,
 and all four repository folds were positive. Pool size averaged 11.43 candidates
 with median 8 and maximum 42.
 
-This passes direct full-scope reranking. E042 preregisters the repository-scale
-gate on the same 222 tasks and frozen scorer, with exact E031 and E041 continuity
-guards. Repository-pool outcomes are compared against per-task uniform choice
-over the actual E024-bindable repository pool. No retrieval or generator stage
-is introduced until that direct-ranking boundary is measured.
+E042 completed the repository-scale gate. After 13 deterministic rendering
+ambiguity exclusions, 209/222 tasks remained. Complete E024-bindable repository
+pools averaged 566.75 candidates (median 483, range 76–1,122). The frozen scorer
+achieved 17/209 top-1 versus 0.607 expected successes under per-task uniform
+choice, for +7.84 pp mean excess with clustered 95% CI +4.46 to +11.85 pp.
+Every repository fold was positive, and all E031/E041 continuity guards
+reproduced exactly.
+
+This establishes repository-wide ranking signal but also makes the practical
+bottleneck explicit: target top-50 recall under direct scorer ranking was
+134/209 (64.1%), while top-20 recall was 93/209 (44.5%). The next main-line
+experiment is an independent/cacheable retrieval or shortlisting stage whose
+target recall is measured separately before frozen reranking. Do not choose a
+shortlist cutoff post hoc from E042.
 
 ## Confidence and escalation
 
@@ -266,3 +275,25 @@ An exploratory PR should state:
 2. the deterministic success/failure signal;
 3. the comparison baseline;
 4. the outcome that would stop the direction.
+
+## Encoder dependence: CodeBERT / GraphCodeBERT
+
+CodeRankEmbed is currently the frozen decision encoder. A CodeBERT-family swap
+remains useful as an exploratory architecture-dependence test: freeze the task,
+PairwiseMLP head shape, training order, predicates, and split, and change only
+the encoder. The question is whether the decision effect depends on a modern
+retrieval-specialized encoder or survives with an older code-native
+representation.
+
+Do not treat a development-repository encoder bakeoff as confirmatory. Any
+claim of transferred end-to-end corrective-burden performance requires a fresh
+preregistered population.
+
+## Predicate infrastructure
+
+The predicate layer is now stable enough to extend deliberately. Useful
+contributor targets include LSP symbol/reference facts, type-checker or compiler
+diagnostics, deterministic API compatibility, and test/mutation outcomes.
+Every new predicate should be machine-checkable, fail open on unavailable
+information, and include labelled-target veto regression checks before it is
+allowed into a live experiment.
