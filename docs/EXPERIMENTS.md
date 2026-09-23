@@ -271,3 +271,23 @@ The invalid outputs were mostly genuine generation failures rather than harmless
 formatting. E033 therefore stops at the validity gate for this generator and
 surface; do not rescue it with permissive deterministic reconstruction of
 missing calls or arguments.
+
+## E034 — Closed-vocabulary argument operations
+
+See [E034_ARGUMENT_OPERATIONS.md](E034_ARGUMENT_OPERATIONS.md).
+
+Successor to the stopped E033 free-form call surface. The generator emits a
+candidate index plus exactly one argument operation (keep, swap, drop, rename,
+name, unname) whose identifier operands must come from a closed vocabulary:
+call-site keywords plus parameter names visible in any candidate. The masked
+call is perturbed deterministically and label-free, with the original as truth;
+a four-stage verifier (parse and vocabulary, applicability, E024 bindability,
+exact match) judges the plan. A model-free predicate-search baseline enumerates
+the same candidate x operation plan space the parser admits, and a leakage
+control checks that the visible corruption is invariant to relabelling.
+
+Census:
+
+```bash
+python examples/census_argument_ops.py
+```
