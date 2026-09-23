@@ -343,11 +343,14 @@ Unrotated summed canonical likelihood was 0/64; four-way cyclic-rotation summed
 likelihood was 10/64. Both were at or below the predicate-plus-uniform floor, so
 no paired assisted E036 run is warranted.
 
-The unrotated ranking put candidate 1 first on 64/64 tasks; rotation dispersed
-that position prior to a 13/13/18/20 candidate histogram. Secondary feasible-only
-summed ranking reached 16/64 unrotated and 19/64 rotated, but that diagnostic was
-not the preregistered continuation gate and must not be used post hoc to reopen
-the stopped run.
+The unrotated ranking put candidate 1 first on 64/64 tasks. After rotation the
+mapped-back winner histogram was 13/13/18/20, but that histogram alone cannot
+show whether the position prior cancelled because cross-candidate ties can still
+be resolved to a nominal winner. A later diagnostic adds explicit tie counting;
+the historical E036 aggregate did not retain enough information to reconstruct
+it. Secondary feasible-only summed ranking reached 16/64 unrotated and 19/64
+rotated, but that diagnostic was not the preregistered continuation gate and
+must not be used post hoc to reopen the stopped run.
 
 E036 remains canonical continuation likelihood ranking under a frozen prompt
 token boundary, not exact grammar-constrained decoding.
