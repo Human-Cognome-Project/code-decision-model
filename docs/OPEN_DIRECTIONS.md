@@ -24,42 +24,37 @@ E029 then removed verifier-rejected candidates from the correction turn. It near
 
 Do not spend cycles prompt-tuning E029 on the development repositories.
 
-## E032 ranked feasible re-recommendation — development-set result complete
+## E032/E035 — ranked feasible re-recommendation (independently replicated)
 
-The final live intervention preserves the E029 correction prompt exactly and
-appends the historical recommendation sentence for the scorer's next feasible
-candidate.
+E032 finalized the ranked correction mechanism on the development repositories:
+after deterministic rejection, append the scorer's next feasible ranked
+recommendation to the unchanged E029 correction prompt.
 
-Result:
+Development result:
 
-- E029: 292/400 (73.0%) success within two attempts;
-- E032: 315/400 (78.75%);
-- wrong-first-recommendation recovery: 56/164 (34.1%) -> 79/164 (48.2%);
-- wrong-subset delta: +14.02 pp;
+- E029 correction recovery: 56/164 (34.1%);
+- E032 ranked recovery: 79/164 (48.2%);
+- delta: +14.02 pp;
 - exact McNemar p = 0.0128;
-- source-file-clustered bootstrap 95% CI: +2.07 to +25.49 pp;
-- second recommendation followed on 156/164 correction turns.
+- clustered 95% CI: +2.07 to +25.49 pp.
 
-This is useful exploratory evidence but it was finalized on the development
-repositories after a prompt-order ambiguity was discovered there.
+E035 then preregistered the exact final intervention on the frozen E031
+independent repositories. The replication passed all three preregistered gates:
 
-### Next E032 gate
+- E029 correction recovery: 62/177 (35.0%);
+- ranked correction recovery: 111/177 (62.7%);
+- delta: +27.68 pp;
+- exact McNemar p = 3.48e-7;
+- clustered 95% CI: +17.65 to +37.16 pp;
+- second recommendation followed on 164/177 correction turns.
 
-Freeze the exact final prompt and replicate the ranked-correction mechanism on
-the E031 independent repository set.
+Reconstructed overall success on the 421-task independent set was 306/421
+(72.7%) under E029-style rejection memory versus 355/421 (84.3%) with ranked
+re-recommendation.
 
-Do not change:
-
-- scorer recipe;
-- first-turn prompt;
-- E029 correction prefix;
-- appended recommendation wording;
-- parser;
-- two-attempt budget;
-- statistics.
-
-A failure to reproduce the correction benefit on the E031 repositories should
-stop treating ranked re-recommendation as a general mechanism.
+Treat the post-rejection ranked-evidence mechanism as independently replicated
+for the frozen Python structured-selection task. Do not retune E035 on the E031
+repositories.
 
 ## E033 — call-expression intent (stopped at validity gate)
 
