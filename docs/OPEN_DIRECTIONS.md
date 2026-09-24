@@ -227,6 +227,13 @@ experiment is an independent/cacheable retrieval or shortlisting stage whose
 target recall is measured separately before frozen reranking. Do not choose a
 shortlist cutoff post hoc from E042.
 
+E044 measured a deterministic candidate for part of that first stage on E030
+cross-file calls: the functions in the modules the caller's file already
+imports, with the target's own import name removed. On the pinned E031
+repositories it contains the target on 72.8% of 265 tasks, with a median pool of
+four. Combining it with a frozen retriever needs its own preregistration; see
+[E044_IMPORT_NEIGHBOURHOOD.md](E044_IMPORT_NEIGHBOURHOOD.md).
+
 ## Confidence and escalation
 
 E020 falsified raw Potion cosine margin as a useful general routing signal.

@@ -491,3 +491,25 @@ ranked by context-to-candidate cosine using a cheap Potion 16M primary retriever
 and frozen CodeRank reference. The primary shortlist is fixed at 32 candidates;
 retrieval target recall is measured separately from any later decision reranking.
 No PairwiseMLP or generator is used in E043.
+
+## E044 — Import-neighbourhood pools
+
+See [E044_IMPORT_NEIGHBOURHOOD.md](E044_IMPORT_NEIGHBOURHOOD.md).
+
+A model-free first stage for E030 cross-file calls, measured as a descriptive
+census. The pool is every top-level function in the repository files that the
+caller's file imports from, with the target's own import name removed, pruned
+by E024 and deduplicated by rendering. On the 265 E030 tasks from the pinned
+E031 repositories, it contains the target on 193 (72.8%), or 191 when only
+names read outside the caller count. That compares with 16.9 expected for a
+random pool of the same size. The median bindable pool has four candidates.
+Misses are files where no other resolvable import names the target's module.
+Optuna contributes 187 of the tasks. The census selects no shortlist size and
+does not change E043. Using the neighbourhood as a first stage needs its own
+preregistration.
+
+Census (no download):
+
+```bash
+python examples/census_import_neighbourhoods.py [ROOT ...] --body-chars 512
+```
