@@ -234,6 +234,18 @@ repositories it contains the target on 72.8% of 265 tasks, with a median pool of
 four. Combining it with a frozen retriever needs its own preregistration; see
 [E044_IMPORT_NEIGHBOURHOOD.md](E044_IMPORT_NEIGHBOURHOOD.md).
 
+E043 then completed the preregistered context-cosine retrieval gate on those
+265 E030 tasks. Potion 16M recovered 192/265 targets at the fixed 32-candidate
+budget (72.45%) and therefore failed the 75% recall floor, although its excess
+over uniform was clearly positive. CodeRank recovered 224/265 (84.53%) and
+passed both preregistered conditions; its clustered 95% CI for excess at 32 was
++43.91 to +61.14 pp. CodeRank rank-1 alone was 122/265 (46.0%).
+
+Per the frozen continuation rule, E045 now tests the exact CodeRank top-32
+shortlist followed by the unchanged E031 leave-one-repository-out PairwiseMLP.
+The primary comparison is paired end-to-end top-1 against CodeRank's own rank-1
+ordering. E044 is not mixed into that gate.
+
 ## Confidence and escalation
 
 E020 falsified raw Potion cosine margin as a useful general routing signal.

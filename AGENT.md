@@ -38,6 +38,8 @@ The completed confirmatory evidence now includes **E031**, the preregistered dev
 - **E036:** canonical continuation likelihood on the exact 64 E034 tasks did not clear its baseline-only stop floor: 0/64 exact unrotated and 10/64 with cyclic rotation versus 12.32/64 expected under uniform choice over E024-binding plans. Do not run the paired assisted E036 arm or promote the 19/64 feasible-only secondary into a post-hoc gate. This was canonical one-tokenization-per-plan scoring, not exact constrained decoding.
 - **E041:** the frozen E031 scorer transferred from four-way same-file function decisions to complete E024-bindable in-scope pools: 82/222 (36.9%) top-1 versus 27.73/222 (12.5%) expected under predicate-plus-uniform choice, +24.45 pp mean excess; clustered 95% CI +13.57 to +35.67 pp. All four repository folds were positive.
 - **E042:** repository-pool scaling also passed. After 13 deterministic rendering-ambiguity exclusions, the frozen scorer achieved 17/209 (8.13%) top-1 over complete E024-bindable repository pools versus 0.607 expected successes (0.29%) under per-task uniform choice. Mean excess was +7.84 pp; clustered 95% CI +4.46 to +11.85 pp. Pools averaged 566.75 candidates, median 483, maximum 1,122. All E031/E041 continuity guards reproduced exactly. Treat repository-wide ranking signal as demonstrated, but not practical direct selection.
+- **E043:** cross-file repository retrieval retained 265 E030 tasks. Potion 16M reached 192/265 (72.45%) recall@32 and failed the preregistered 75% floor despite a positive excess CI. CodeRank reached 224/265 (84.53%) with clustered excess CI +43.91 to +61.14 pp and passed. The frozen continuation is CodeRank top-32 followed by the unchanged E031 reranker; do not substitute Potion or retune the cutoff.
+- **E044:** a deterministic import-neighbourhood census recovered 193/265 (72.8%) cross-file targets with median bindable pool four, but is descriptive only and is not part of E045.
 
 Do not reinterpret or retune E031 after seeing its result. Do not tune the four E027 repositories merely to improve reported historical numbers.
 
@@ -47,7 +49,7 @@ See [docs/OPEN_DIRECTIONS.md](docs/OPEN_DIRECTIONS.md).
 
 Current high-value work includes:
 
-- **main line / E043:** run the preregistered cross-file repository retrieval gate before any new reranker or generator experiment. E030 masked caller context only; Potion 16M primary, frozen CodeRank cosine reference, fixed primary shortlist 32, recall reported separately from reranking;
+- **main line / E045:** run the preregistered frozen reranking gate: exact E043 CodeRank top-32 retrieval followed by the unchanged E031 leave-one-repository-out PairwiseMLP. Retrieval misses remain failures; compare paired end-to-end top-1 against CodeRank's frozen 122/265 rank-1 baseline;
 - **encoder ablation:** CodeBERT/GraphCodeBERT is an open component-dependence experiment. Freeze task, head, training protocol, predicates, and split; change only the encoder. Treat it as exploratory unless run on a fresh preregistered population;
 - **predicate infrastructure:** add independent machine-checkable constraints from LSP/type-checker/compiler/API/test facts, with labelled-target veto regression checks and fail-open handling of unknown information;
 - if structured edit-intent generation is revisited, use a materially more capable generator under a fresh preregistration; do not continue schema/prompt tuning with Qwen 0.5B;
@@ -88,3 +90,4 @@ Current high-value work includes:
 6. In PR descriptions, state what would cause the direction to stop.
 
 If a change would contaminate a frozen result or violate an invariant, do not submit it.
+
