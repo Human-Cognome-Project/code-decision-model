@@ -516,12 +516,22 @@ python examples/census_import_neighbourhoods.py [ROOT ...] --body-chars 512
 
 ## E045 — Frozen reranking after CodeRank retrieval
 
-See [E045_RETRIEVED_RERANKING_PREREG.md](E045_RETRIEVED_RERANKING_PREREG.md).
+See [E045_RETRIEVED_RERANKING_PREREG.md](E045_RETRIEVED_RERANKING_PREREG.md)
+and [E045_RETRIEVED_RERANKING_RESULT.md](E045_RETRIEVED_RERANKING_RESULT.md).
 
-Preregisters the exact continuation from E043: reproduce CodeRank's frozen
-top-32 retrieval and apply the unchanged E031 leave-one-repository-out
-PairwiseMLP only to the retrieved shortlist. Retrieval misses remain pipeline
-failures. The primary paired baseline is CodeRank's own rank-1 result
-(122/265); E045 passes only with more top-1 successes, exact McNemar p < 0.05,
-and a positive clustered-bootstrap lower bound. No E030 training, E044 hybrid,
-generator call, or shortlist tuning is allowed.
+The exact CodeRank top-32 -> frozen E031 PairwiseMLP continuation failed. Raw
+CodeRank ranked 122/265 targets first; the reranker ranked 123/265 first
+(+0.38 pp), with exact McNemar p = 1.0 and clustered 95% CI -8.01 to +8.05 pp.
+It rescued 33 retrieval errors and spoiled 32 retrieval rank-1 hits. Stop this
+exact path without tuning on the observed population.
+
+## E046 — Label-free import-neighbourhood priority retrieval
+
+See [E046_LABEL_FREE_NEIGHBOURHOOD_RETRIEVAL_PREREG.md](E046_LABEL_FREE_NEIGHBOURHOOD_RETRIEVAL_PREREG.md).
+
+Preregisters a label-free deterministic dependency priority ahead of frozen
+CodeRank at the unchanged 32-candidate budget. Only repository imports whose
+bound names are read outside the masked caller can enter the priority
+neighbourhood; no hidden target alias or answer is consulted. The primary
+paired baseline is E043 CodeRank recall@32, 224/265. The gate requires more
+hits, exact McNemar p < 0.05, and a positive clustered-bootstrap lower bound.
