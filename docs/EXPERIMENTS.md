@@ -483,14 +483,14 @@ separately from reranking.
 
 ## E043 — Cross-file repository retrieval
 
-See [E043_CROSS_FILE_RETRIEVAL_PREREG.md](E043_CROSS_FILE_RETRIEVAL_PREREG.md).
+See [E043_CROSS_FILE_RETRIEVAL_PREREG.md](E043_CROSS_FILE_RETRIEVAL_PREREG.md)
+and [E043_CROSS_FILE_RETRIEVAL_RESULT.md](E043_CROSS_FILE_RETRIEVAL_RESULT.md).
 
-Preregisters a retrieval-only test on E030 cross-file callers whose returned
-context omits the import statement. Complete E024-bindable repository pools are
-ranked by context-to-candidate cosine using a cheap Potion 16M primary retriever
-and frozen CodeRank reference. The primary shortlist is fixed at 32 candidates;
-retrieval target recall is measured separately from any later decision reranking.
-No PairwiseMLP or generator is used in E043.
+On 265 retained E030 cross-file tasks, Potion 16M recovered 192/265 targets at
+the fixed 32-candidate cutoff (72.45%) and failed the preregistered 75% recall
+floor. CodeRank recovered 224/265 (84.53%), with clustered 95% CI for excess
+over uniform of +43.91 to +61.14 pp, and passed. The preregistered continuation
+therefore selects CodeRank retrieval for the next frozen-reranker experiment.
 
 ## E044 — Import-neighbourhood pools
 
@@ -513,3 +513,15 @@ Census (no download):
 ```bash
 python examples/census_import_neighbourhoods.py [ROOT ...] --body-chars 512
 ```
+
+## E045 — Frozen reranking after CodeRank retrieval
+
+See [E045_RETRIEVED_RERANKING_PREREG.md](E045_RETRIEVED_RERANKING_PREREG.md).
+
+Preregisters the exact continuation from E043: reproduce CodeRank's frozen
+top-32 retrieval and apply the unchanged E031 leave-one-repository-out
+PairwiseMLP only to the retrieved shortlist. Retrieval misses remain pipeline
+failures. The primary paired baseline is CodeRank's own rank-1 result
+(122/265); E045 passes only with more top-1 successes, exact McNemar p < 0.05,
+and a positive clustered-bootstrap lower bound. No E030 training, E044 hybrid,
+generator call, or shortlist tuning is allowed.
