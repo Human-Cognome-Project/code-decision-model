@@ -186,7 +186,37 @@ jobs:
               })
 
           if not tasks:
-              raise RuntimeError(f"E043 no retained tasks for {HELDOUT}")
+              # A preregistered repository may legitimately contribute zero E030
+              # tasks (AlphaFold does on the pinned E031 revision). Preserve the
+              # empty stratum in the fold accounting rather than treating it as
+              # an integrity failure; the aggregate gate is computed over the
+              # retained task population.
+              summary = {
+                  "heldout_repo": HELDOUT,
+                  "extracted_tasks": len(examples),
+                  "retained_tasks": 0,
+                  "ambiguity_exclusions": exclusions,
+                  "pool": {
+                      "min": None,
+                      "max": None,
+                      "mean": None,
+                      "median": None,
+                  },
+                  "potion": None,
+                  "coderank": None,
+                  "runtime": {
+                      "potion": None,
+                      "coderank": None,
+                  },
+              }
+              path = f"/tmp/e043-{HELDOUT}.json"
+              with open(path, "w", encoding="utf-8") as handle:
+                  json.dump(
+                      {"summary": summary, "records": []},
+                      handle, indent=2, sort_keys=True
+                  )
+              print("E043_FOLD=" + json.dumps(summary, sort_keys=True))
+              raise SystemExit(0)
           if len(tasks) + len(exclusions) != len(examples):
               raise RuntimeError("E043 population accounting drift")
 
