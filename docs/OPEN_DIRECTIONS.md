@@ -241,10 +241,18 @@ over uniform was clearly positive. CodeRank recovered 224/265 (84.53%) and
 passed both preregistered conditions; its clustered 95% CI for excess at 32 was
 +43.91 to +61.14 pp. CodeRank rank-1 alone was 122/265 (46.0%).
 
-Per the frozen continuation rule, E045 now tests the exact CodeRank top-32
-shortlist followed by the unchanged E031 leave-one-repository-out PairwiseMLP.
-The primary comparison is paired end-to-end top-1 against CodeRank's own rank-1
-ordering. E044 is not mixed into that gate.
+E045 then tested the exact CodeRank top-32 shortlist followed by the unchanged
+E031 leave-one-repository-out PairwiseMLP. It failed cleanly: 123/265 reranked
+top-1 versus 122/265 for raw CodeRank, exact McNemar p = 1.0, and clustered 95%
+CI -8.01 to +8.05 pp. The reranker rescued 33 CodeRank rank-2-to-32 targets but
+spoiled 32 CodeRank rank-1 hits. Stop this exact path; do not tune the scorer or
+shortlist on these repositories.
+
+E046 now returns to the first stage and preregisters a label-free dependency
+signal. Imported repository modules are prioritized only when their bound names
+are read elsewhere in the caller's file, independent of the masked caller and
+hidden label; CodeRank fills/ranks the fixed 32-candidate shortlist. Its primary
+comparison is paired recall@32 against the frozen E043 CodeRank 224/265 baseline.
 
 ## Confidence and escalation
 

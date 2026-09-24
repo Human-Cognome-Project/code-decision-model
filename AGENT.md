@@ -39,7 +39,8 @@ The completed confirmatory evidence now includes **E031**, the preregistered dev
 - **E041:** the frozen E031 scorer transferred from four-way same-file function decisions to complete E024-bindable in-scope pools: 82/222 (36.9%) top-1 versus 27.73/222 (12.5%) expected under predicate-plus-uniform choice, +24.45 pp mean excess; clustered 95% CI +13.57 to +35.67 pp. All four repository folds were positive.
 - **E042:** repository-pool scaling also passed. After 13 deterministic rendering-ambiguity exclusions, the frozen scorer achieved 17/209 (8.13%) top-1 over complete E024-bindable repository pools versus 0.607 expected successes (0.29%) under per-task uniform choice. Mean excess was +7.84 pp; clustered 95% CI +4.46 to +11.85 pp. Pools averaged 566.75 candidates, median 483, maximum 1,122. All E031/E041 continuity guards reproduced exactly. Treat repository-wide ranking signal as demonstrated, but not practical direct selection.
 - **E043:** cross-file repository retrieval retained 265 E030 tasks. Potion 16M reached 192/265 (72.45%) recall@32 and failed the preregistered 75% floor despite a positive excess CI. CodeRank reached 224/265 (84.53%) with clustered excess CI +43.91 to +61.14 pp and passed. The frozen continuation is CodeRank top-32 followed by the unchanged E031 reranker; do not substitute Potion or retune the cutoff.
-- **E044:** a deterministic import-neighbourhood census recovered 193/265 (72.8%) cross-file targets with median bindable pool four, but is descriptive only and is not part of E045.
+- **E044:** a deterministic import-neighbourhood census recovered 193/265 (72.8%) cross-file targets with median bindable pool four, but is descriptive only and was not part of E045.
+- **E045:** exact CodeRank top-32 retrieval followed by the unchanged E031 PairwiseMLP produced 123/265 top-1 versus 122/265 for raw CodeRank, +0.38 pp; exact McNemar p = 1.0; clustered 95% CI -8.01 to +8.05 pp. The gate failed. Stop this exact CodeRank→E031-reranker path; 33 rescued retrieval errors were almost exactly cancelled by 32 spoiled CodeRank rank-1 hits.
 
 Do not reinterpret or retune E031 after seeing its result. Do not tune the four E027 repositories merely to improve reported historical numbers.
 
@@ -49,7 +50,7 @@ See [docs/OPEN_DIRECTIONS.md](docs/OPEN_DIRECTIONS.md).
 
 Current high-value work includes:
 
-- **main line / E045:** run the preregistered frozen reranking gate: exact E043 CodeRank top-32 retrieval followed by the unchanged E031 leave-one-repository-out PairwiseMLP. Retrieval misses remain failures; compare paired end-to-end top-1 against CodeRank's frozen 122/265 rank-1 baseline;
+- **main line / E046:** test a label-free deterministic import-neighbourhood priority bit ahead of frozen CodeRank ranking at the same fixed top-32 budget. The neighbourhood may use only imports independently read outside the masked caller; compare paired recall@32 against E043's frozen 224/265 CodeRank baseline;
 - **encoder ablation:** CodeBERT/GraphCodeBERT is an open component-dependence experiment. Freeze task, head, training protocol, predicates, and split; change only the encoder. Treat it as exploratory unless run on a fresh preregistered population;
 - **predicate infrastructure:** add independent machine-checkable constraints from LSP/type-checker/compiler/API/test facts, with labelled-target veto regression checks and fail-open handling of unknown information;
 - if structured edit-intent generation is revisited, use a materially more capable generator under a fresh preregistration; do not continue schema/prompt tuning with Qwen 0.5B;
@@ -78,7 +79,8 @@ Current high-value work includes:
 - further Qwen 0.5B prompt/schema tuning on the E033/E034 validity-pilot tasks;
 - paired E036 assistance or post-hoc gate changes on the frozen 64-task canonical-likelihood pilot;
 - training on E041/E042 pool-expanded evaluation tasks;
-- post-hoc shortlist-size selection from E042 target-rank diagnostics.
+- post-hoc shortlist-size selection from E042 target-rank diagnostics;
+- tuning the E045 PairwiseMLP, shortlist size, or cross-file population after its null reranking result.
 
 ## How to work
 
