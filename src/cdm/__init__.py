@@ -70,6 +70,13 @@ from .scope import (
     pool_example,
     pool_examples,
 )
+from .neighbourhood import (
+    NeighbourhoodCensus,
+    RepositoryNeighbourhoods,
+    import_neighbourhoods,
+    neighbourhood_census,
+    neighbourhood_censuses,
+)
 from .call_intent import (
     CallIntentOutcome,
     CallIntentVerification,
@@ -142,6 +149,11 @@ __all__ = [
     "pool_census",
     "pool_example",
     "pool_examples",
+    "NeighbourhoodCensus",
+    "RepositoryNeighbourhoods",
+    "import_neighbourhoods",
+    "neighbourhood_census",
+    "neighbourhood_censuses",
     "ChanceBaselines",
     "ContinuationScore",
     "HFPlanScorer",
